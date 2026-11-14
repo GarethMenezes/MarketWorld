@@ -1,4 +1,4 @@
-# SignCalculator
+
 Durham Hackathon
 
 ## Market Worlds
