@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Market Worlds</title>
+  <style>
+    :root {
+      --panel: rgba(8, 12, 24, 0.72);
+      --border: rgba(140, 170, 255, 0.18);
+      --text: #e6ecff;
+      --muted: #8f9bbf;
+      --up: #4ade80;
+      --down: #f87171;
+      --accent: #7dd3fc;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #02040a; color: var(--text);
+      font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+    #scene { position: fixed; inset: 0; display: block; }
+    .panel { position: fixed; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 12px 14px; backdrop-filter: blur(6px); }
+    h1 { margin: 0 0 2px; font-size: 18px; letter-spacing: 0.04em; }
+    .sub { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+    #stats { top: 16px; left: 16px; width: 270px; }
+    .row { display: flex; justify-content: space-between; gap: 8px; margin: 3px 0; }
+    .row .k { color: var(--muted); }
+    .row .v { font-variant-numeric: tabular-nums; text-align: right; }
+    #date { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; margin-bottom: 6px; }
+    #mood { margin-top: 8px; font-size: 13px; color: var(--accent); min-height: 1.4em; }
+    #info { top: 16px; right: 16px; width: 300px; display: none; }
+    #info h2 { margin: 0; font-size: 20px; }
+    #info .close { position: absolute; top: 8px; right: 10px; background: none; border: 0;
+      color: var(--muted); font-size: 18px; cursor: pointer; }
+    #ai { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 13px; }
+    #ai .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+    #legend { left: 16px; bottom: 92px; width: 270px; font-size: 12px; }
+    #legend b { color: var(--text); }
+    #legend div { color: var(--muted); margin: 2px 0; }
+    .swatch { display: inline-block; width: 46px; height: 8px; border-radius: 4px; vertical-align: middle;
+      background: linear-gradient(90deg, #ff3030, #ffd23a, #2fe36a); }
+    #timeline { left: 16px; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 12px; }
+    #play { width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--border);
+      background: #18233f; color: var(--text); font-size: 16px; cursor: pointer; flex: none; }
+    #slider { flex: 1; accent-color: var(--accent); }
+    #sliderDate { width: 96px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+    #disclaimer { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); font-size: 12px;
+      color: var(--muted); background: var(--panel); padding: 4px 12px; border-radius: 999px;
+      border: 1px solid var(--border); white-space: nowrap; }
+    .up { color: var(--up); } .down { color: var(--down); }
+    #keys { color: var(--muted); font-size: 11px; margin-top: 6px; }
+    @media (max-width: 760px) {
+      #legend, #disclaimer { display: none; }
+      #stats { width: auto; right: 16px; }
+      #info { top: auto; bottom: 80px; left: 16px; right: 16px; width: auto; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="scene"></canvas>
+
+  <div id="stats" class="panel">
+    <h1>MARKET WORLDS</h1>
+    <div class="sub">20 years of the US stock market as a planet</div>
+    <div id="date">—</div>
+    <div class="row"><span class="k">Market fear (VIX)</span><span class="v" id="vix">—</span></div>
+    <div class="row"><span class="k">Sector correlation</span><span class="v" id="corr">—</span></div>
+    <div class="row"><span class="k">Market this week</span><span class="v" id="mret">—</span></div>
+    <div id="mood"></div>
+  </div>
+
+  <div id="info" class="panel">
+    <button class="close" id="infoClose" aria-label="Close">×</button>
+    <h2 id="infoTitle"></h2>
+    <div class="sub" id="infoSub"></div>
+    <div id="infoRows"></div>
+    <div id="ai"></div>
+  </div>
+
+  <div id="legend" class="panel">
+    <div><b>Continent</b> = a sector (5 big companies)</div>
+    <div><b>Mountain</b> = a company · height = growth since 2007</div>
+    <div><b>Mountain colour</b> = this week <span class="swatch"></span> down → up</div>
+    <div><b>Sky &amp; clouds</b> = market fear (VIX) · lightning above 40</div>
+    <div><b>Earthquake</b> = market fell more than 7% in a week</div>
+    <div><b>Continental drift</b> = sectors moving together (correlation)</div>
+    <div id="keys">Space play · ←/→ week · Shift+←/→ year · click a mountain</div>
+  </div>
+
+  <div id="disclaimer">For exploration and education — not financial advice</div>
+
+  <div id="timeline" class="panel">
+    <button id="play" aria-label="Play">▶</button>
+    <input id="slider" type="range" min="0" max="0" value="0" />
+    <span id="sliderDate"></span>
+  </div>
+
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
