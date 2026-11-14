@@ -38,6 +38,8 @@ VOLUME_WINDOW = 52   # weeks for "normal" trading volume
 ROOT = Path(__file__).parent
 RAW = ROOT / "data" / "raw.pkl"
 OUT = ROOT / "public" / "world.json"
+STRESS_OUT = ROOT / "public" / "stress.json"
+CALM_VIX, CRISIS_VIX = 20, 30   # stress-test regimes: calm = VIX < 20, crisis = VIX > 30
 
 
 def download():
@@ -133,12 +135,44 @@ def build(close, volume):
         "avgCorr": clean(wk_corr.reindex(dates), 3),
         "pairCorr": pair_corr,
     }
-    return {
+    world = {
         "dates": [d.strftime("%Y-%m-%d") for d in dates],
         "sectors": sectors,
         "stocks": stocks,
         "market": market,
     }
+    vix_daily = close[VIX] if VIX in close else pd.Series(np.nan, index=close.index)
+    return world, build_stress(sec, vix_daily)
+
+
+def build_stress(sec, vix_daily):
+    """'What if?' sandbox data: how each sector moved per 1% move in another, by regime.
+
+    beta[i][j] = cov(r_j, r_i) / var(r_i)  (i = shocked sector, j = affected sector)
+    Regimes from the same day's VIX close: calm < CALM_VIX, crisis > CRISIS_VIX.
+    """
+    names = list(sec.columns)
+    df = sec.join(vix_daily.rename("VIX")).dropna()
+    regimes = {}
+    for regime, mask in (("calm", df["VIX"] < CALM_VIX), ("crisis", df["VIX"] > CRISIS_VIX)):
+        r = df.loc[mask, names]
+        cov, var, corr = r.cov(), r.var(), r.corr()
+        regimes[regime] = {
+            "days": int(len(r)),
+            "beta": {i: {j: round(float(cov.loc[i, j] / var[i]), 3) for j in names} for i in names},
+            "corr": {i: {j: round(float(corr.loc[i, j]), 3) for j in names} for i in names},
+        }
+    # Summary: average beta from each shocked sector to the others, calm vs crisis
+    print(f"Stress regimes: calm {regimes['calm']['days']} days (VIX<{CALM_VIX}), "
+          f"crisis {regimes['crisis']['days']} days (VIX>{CRISIS_VIX})")
+    higher = 0
+    for i in names:
+        avg = {k: np.mean([regimes[k]["beta"][i][j] for j in names if j != i]) for k in regimes}
+        higher += avg["crisis"] > avg["calm"]
+        print(f"  {i:12s} avg beta to others  calm {avg['calm']:.2f}  crisis {avg['crisis']:.2f}")
+    if higher < len(names):
+        print(f"  NOTE: crisis beta is NOT higher for {len(names) - higher} sector(s) — reported, not hidden.")
+    return {"sectors": names, "calmVix": CALM_VIX, "crisisVix": CRISIS_VIX, "regimes": regimes}
 
 
 def main():
@@ -147,9 +181,10 @@ def main():
         close, volume = raw["close"], raw["volume"]
     else:
         close, volume = download()
-    world = build(close, volume)
+    world, stress = build(close, volume)
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(world, separators=(",", ":")))
+    STRESS_OUT.write_text(json.dumps(stress, indent=1))
     print(f"Wrote {OUT} ({OUT.stat().st_size / 1e6:.2f} MB), "
           f"{len(world['dates'])} weeks, {len(world['stocks'])} stocks")
 

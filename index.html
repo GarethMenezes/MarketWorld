@@ -74,6 +74,26 @@
     .nav button { background: none; border: 1px solid var(--line2); border-radius: 15px; padding: 4px 12px; font-size: 12px; color: var(--muted); }
     .nav button:hover { color: var(--text); }
     .fine { margin-top: 18px; color: var(--dim); font-size: 10.5px; line-height: 1.7; }
+    /* What if? sandbox */
+    #whatif { display: none; }
+    .wi-headline { font-size: 17px; line-height: 1.4; margin: 10px 0 14px; }
+    .wi-controls { display: grid; grid-template-columns: auto 1fr; gap: 8px 10px; align-items: center; }
+    .wi-controls select { grid-column: 2; background: #0a0a0a; color: var(--text); border: 1px solid var(--line2); border-radius: 6px; padding: 4px 6px; }
+    .wi-controls input { grid-column: 1 / 2; width: 100%; accent-color: #d9d9d9; }
+    .wi-controls #wiShockVal { text-align: right; color: var(--text); }
+    .wi-controls input { grid-column: 1; } .wi-controls #wiShockVal { grid-column: 2; }
+    .wi-toggle { display: flex; margin: 12px 0; border: 1px solid var(--line2); border-radius: 16px; overflow: hidden; width: max-content; }
+    .wi-toggle button { background: none; border: 0; padding: 5px 14px; font-size: 12px; color: var(--muted); }
+    .wi-toggle button[aria-pressed="true"] { background: var(--text); color: #000; }
+    .wi-row { display: grid; grid-template-columns: 88px 1fr 46px; gap: 8px; align-items: center; font-size: 12px; padding: 3px 0; }
+    .wi-row.shocked .wi-name { color: var(--text); font-weight: 600; }
+    .wi-name { color: var(--muted); }
+    .wi-track { height: 6px; background: #111; border-radius: 3px; overflow: hidden; }
+    .wi-bar { display: block; height: 100%; border-radius: 3px; transition: width .4s; }
+    .wi-bar.down { background: var(--red); } .wi-bar.up { background: var(--accent); }
+    .wi-val { text-align: right; font-variant-numeric: tabular-nums; }
+    .pill { border: 1px solid var(--line2); background: none; border-radius: 16px; padding: 6px 14px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+    .pill:hover { color: var(--text); }
     .fine a { text-decoration: none; border-bottom: 1px solid var(--line2); }
 
     /* Timebar */
@@ -128,6 +148,23 @@
     </section>
 
     <aside class="story" id="story">
+      <article id="whatif" class="card">
+        <div class="meta mono"><span style="color:var(--accent)">What if?</span><span>stress test</span></div>
+        <p class="wi-headline" id="wiHeadline"></p>
+        <div class="wi-controls">
+          <label class="mono" for="wiSector">Shock</label>
+          <select id="wiSector"></select>
+          <input id="wiShock" type="range" min="-50" max="20" step="1" value="-30" aria-label="Shock size" />
+          <span class="mono" id="wiShockVal">−30%</span>
+        </div>
+        <div class="wi-toggle" role="group" aria-label="Market regime">
+          <button id="wiCalm" aria-pressed="false">Calm</button><button id="wiCrisis" aria-pressed="true">Crisis</button>
+        </div>
+        <div id="wiBars"></div>
+        <p class="fine">Simple linear model from historical data (2007–today). Not a prediction or financial advice.</p>
+        <div class="nav"><button id="wiExit">Exit · back to the timeline</button></div>
+      </article>
+
       <article id="tour" class="card" aria-live="polite">
         <button class="close" id="tourExit" aria-label="Exit tour">×</button>
         <div class="meta mono"><span id="tourNum">01</span><span class="date" id="tourDate"></span><span id="tourStep"></span></div>
@@ -174,6 +211,7 @@
       <div id="ticks"></div>
     </div>
     <div class="date-readout mono"><span id="sliderDate">—</span><span id="counter">—</span></div>
+    <button id="whatIfBtn" class="pill">What if?</button>
     <button id="tourBtn">Tour</button>
     <div class="arrows"><button class="round" id="prevStop" aria-label="Previous tour stop">↑</button><button class="round" id="nextStop" aria-label="Next tour stop">↓</button></div>
   </nav>

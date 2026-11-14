@@ -8,6 +8,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import planetFragment from './shaders/planet.frag.glsl?raw';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+import { createSandbox } from './sandbox.js';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
 // Tuned on real data 2007–2026 (see check_world.py output).
@@ -199,6 +200,7 @@ const planetUniforms = {
   uContinentColor: { value: Array.from({ length: 6 }, () => new THREE.Color()) },
   uContinentCap: { value: 0.45 },
   uSeaLevel: { value: 0 },
+  uStressTint: { value: new Float32Array(6) },
   uVentDir: { value: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)] },
 };
 const planet = new THREE.Mesh(new THREE.SphereGeometry(R * 1.85, 48, 32), new THREE.ShaderMaterial({
@@ -357,6 +359,8 @@ function makeLabel(text, cls, title) {
 
 // ───────────────────────────── DATA → WORLD ─────────────────────────────
 const data = await fetch('/world.json').then((r) => r.json());
+// 'What if?' sandbox betas (optional file; the button hides if it is missing)
+const stress = await fetch('/stress.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
 let tours = []; // filled in the GUIDED TOURS section; declared early so key handlers never hit it uninitialised
 const N = data.dates.length;
 const stockIndex = Object.fromEntries(data.stocks.map((s) => [s.ticker, s]));
@@ -441,6 +445,7 @@ const state = {
   week: 0, playing: false, acc: 0,
   storm: 0, targetStorm: 0,
   sea: 0, targetSea: 0,
+  sandbox: false, sandboxWeek: 0, stressTarget: new Float32Array(6),
   quake: 0, flash: 0, vix: 15,
   eruption: 0, targetEruption: 0, vents: [0, 1],
   selected: null,
@@ -448,6 +453,7 @@ const state = {
 };
 
 function setWeek(i, { quake = true } = {}) {
+  if (state.sandbox) return;            // the 'What if?' sandbox freezes the timeline
   i = Math.max(0, Math.min(N - 1, i));
   const prev = state.week;
   state.week = i;
@@ -622,6 +628,7 @@ function requestExplanation() {
 $('infoClose').addEventListener('click', () => select(null));
 
 function setPlaying(p) {
+  if (p && state.sandbox) return;      // no playback inside the sandbox
   state.playing = p;
   if (p && state.week >= N - 1) setWeek(0, { quake: false });
   playBtn.textContent = p ? '❚❚ Pause' : '▶ Play';
@@ -643,7 +650,7 @@ window.addEventListener('keydown', (e) => {
     const step = (e.shiftKey ? 52 : 1) * (e.code === 'ArrowRight' ? 1 : -1);
     setWeek(state.week + step);
   } else if (e.code === 'Escape') {
-    if (state.touring) exitTour(); else select(null);
+    if (sandbox?.isActive()) sandbox.close(); else if (state.touring) exitTour(); else select(null);
   } else if (/^Digit[1-9]$/.test(e.code) && Number(e.code.slice(5)) <= tours.length) {
     goToStop(Number(e.code.slice(5)) - 1); // demo shortcut: number keys jump to tour stops
   }
@@ -686,6 +693,7 @@ function updateFly(dt) {
 
 function goToStop(i) {
   if (!tours.length) return;
+  if (sandbox?.isActive()) sandbox.close();
   state.touring = true;
   state.tourStop = (i + tours.length) % tours.length;
   const t = tours[state.tourStop];
@@ -783,6 +791,47 @@ new ResizeObserver(() => {
   labelRenderer.setSize(w, h);
 }).observe(canvas);
 
+// ───────────────────────────── "WHAT IF?" SANDBOX ─────────────────────────────
+// Predicted sector moves are shown with the planet's usual language: mountain colour and glow,
+// darker/redder land (uStressTint), eruptions on the two hardest-hit sectors, a tremor scaled to the
+// biggest fall. The regime sets weather and sea level the same way real calm/crisis weeks do.
+const sandbox = stress ? createSandbox({
+  stress, $,
+  enter() {
+    setPlaying(false);
+    if (state.touring) exitTour();
+    select(null);
+    state.sandboxWeek = state.week;
+    state.sandbox = true;
+  },
+  exit() {
+    state.sandbox = false;
+    state.stressTarget.fill(0);
+    setWeek(state.sandboxWeek, { quake: false });
+  },
+  apply(moves, regime) {
+    const crisis = regime === 'crisis';
+    state.targetStorm = crisis ? 0.75 : 0.1;
+    state.vix = crisis ? 45 : 14;
+    state.targetSea = seaFromCorr(crisis ? 0.8 : 0.2);
+    const order = SECTOR_NAMES.map((name, k) => [moves[name] ?? 0, k]).sort((a, b) => a[0] - b[0]);
+    const worst = order[0][0];
+    state.vents = [order[0][1], order[1][1]];
+    state.targetEruption = worst < -0.1 ? 0.3 + 0.7 * clamp01(-worst / 0.35) : 0;
+    state.quake = Math.max(state.quake, clamp01(-worst / 0.4) * 0.8);
+    continents.forEach((c, k) => {
+      const mv = moves[SECTOR_NAMES[k]] ?? 0;
+      state.stressTarget[k] = mv < 0 ? clamp01(-mv / 0.35) : 0;
+      for (const m of c.mountains) {
+        const u = m.userData;
+        colorFromReturn(mv / 4, u.targetColor);               // −20% → full red
+        u.targetGlow = CONFIG.glow.base + CONFIG.glow.perMove * Math.min(1, Math.abs(mv) * 5);
+      }
+    });
+  },
+}) : null;
+if (!stress) $('whatIfBtn').style.display = 'none';
+
 // ───────────────────────────── ANIMATION ─────────────────────────────
 const clock = new THREE.Clock();
 const tmpQ = new THREE.Quaternion();
@@ -855,6 +904,8 @@ function animate() {
 
   // Continents for the shader: centre direction + world→local rotation (fixed)
   pu.uPlanetPosition.value.copy(world.position);
+  const kStress = 1 - Math.exp(-dt * 3);                      // ~1 s to settle
+  for (let q = 0; q < 6; q++) pu.uStressTint.value[q] += (state.stressTarget[q] - pu.uStressTint.value[q]) * kStress;
   for (let c = 0; c < continents.length; c++) {
     const q = continents[c].group.quaternion;
     pu.uContinentDir.value[c].copy(Z).applyQuaternion(q);

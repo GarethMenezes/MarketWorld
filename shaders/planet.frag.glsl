@@ -55,6 +55,7 @@ uniform vec3 uContinentColor[6];
 uniform float uContinentCap;    // continent angular radius (radians)
 uniform vec3 uVentDir[2];       // volcano axes (unit vectors, world)
 uniform float uSeaLevel;        // current sea level in altitude units (0 = normal); falls with correlation
+uniform float uStressTint[6];   // 'What if?' sandbox: predicted fall per continent → darker, redder land
 
 // Shader works in the original units: planet radius 2 at the origin.
 #define R_PLANET 2.0
@@ -305,6 +306,8 @@ Hit intersectPlanet(vec3 ro, vec3 rd) {
   landCol = mix(landCol, rock, smoothstep(ROCK_LEVEL, ROCK_LEVEL + TRANSITION, altitude));
   landCol = mix(landCol, ICE_COLOR, smoothstep(ICE_LEVEL, ICE_LEVEL + TRANSITION, altitude));
   color = mix(color, landCol, above * (1. - seabed));
+  float stressed = uStressTint[best] * above * (1. - seabed);
+  color = mix(color, color * vec3(.5, .16, .1) + vec3(.06, .008, 0.), stressed * .85);
 
   // Foam line where the sea meets the shore, and a faint ring at the normal shoreline
   float foam = (1. - smoothstep(0., .0035, abs(depth))) * (.55 + .45 * noise(n * 70. + uTime * .25));
