@@ -36,6 +36,11 @@ const CONFIG = {
   weekMs: 120,                                  // playback speed: ms per trading week
   smoothing: 4,                                 // higher = visuals follow data faster
   autoRotateSpeed: 0.35,
+
+  // Performance: start at maxPixelRatio, drop resolution if frames are slow (integrated GPUs)
+  maxPixelRatio: 1.5,
+  minPixelRatio: 0.75,
+  slowFrameMs: 22,
 };
 
 const SECTOR_COLORS = {
@@ -50,8 +55,10 @@ const SECTOR_COLORS = {
 // ───────────────────────────── SETUP ─────────────────────────────
 const R = CONFIG.planetRadius;
 const canvas = document.getElementById('scene');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+// antialias off: the bloom composer renders to its own targets, so MSAA here would be wasted work
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+let pixelRatio = Math.min(window.devicePixelRatio, CONFIG.maxPixelRatio);
+renderer.setPixelRatio(pixelRatio);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
@@ -191,7 +198,7 @@ const clouds = new THREE.Mesh(new THREE.SphereGeometry(R + 0.5, 96, 64), new THR
     float noise(vec3 x) { vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
       return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
                  mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
-    float fbm(vec3 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * noise(p); p *= 2.03; a *= 0.5; } return s / 0.97; }
+    float fbm(vec3 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * noise(p); p *= 2.03; a *= 0.5; } return s / 0.94; }
     void main() {
       vec3 p = normalize(vPos);
       float n = fbm(p * 3.2 + vec3(uTime * 0.015, 0.0, uTime * 0.008));
@@ -460,6 +467,22 @@ function setPlaying(p) {
 playBtn.addEventListener('click', () => setPlaying(!state.playing));
 slider.addEventListener('input', () => setWeek(Number(slider.value)));
 
+// Keyboard: Space play/pause · ←/→ one week · Shift+←/→ one year (52 weeks)
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement && e.target.type === 'text') return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    setPlaying(!state.playing);
+  } else if (e.code === 'ArrowRight' || e.code === 'ArrowLeft') {
+    e.preventDefault(); // stop the focused slider from also moving
+    const step = (e.shiftKey ? 52 : 1) * (e.code === 'ArrowRight' ? 1 : -1);
+    setWeek(state.week + step);
+  } else if (e.code === 'Escape') {
+    select(null);
+  }
+});
+playBtn.addEventListener('keydown', (e) => { if (e.code === 'Space') e.preventDefault(); }); // no double toggle
+
 // Click picking (ignore drags)
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
@@ -487,6 +510,24 @@ const clock = new THREE.Clock();
 const tmpQ = new THREE.Quaternion();
 const X = new THREE.Vector3(1, 0, 0);
 const FLASH_SKY = new THREE.Color('#3a3550');
+
+// Adaptive resolution: average frame time over ~1 s; lower pixel ratio when slow,
+// raise it again when there is plenty of headroom.
+const perf = { time: 0, frames: 0 };
+function adaptQuality(dt) {
+  perf.time += dt; perf.frames++;
+  if (perf.time < 1) return;
+  const ms = (perf.time / perf.frames) * 1000;
+  perf.time = 0; perf.frames = 0;
+  let next = pixelRatio;
+  if (ms > CONFIG.slowFrameMs) next = Math.max(CONFIG.minPixelRatio, pixelRatio - 0.25);
+  else if (ms < 12) next = Math.min(Math.min(window.devicePixelRatio, CONFIG.maxPixelRatio), pixelRatio + 0.25);
+  if (next !== pixelRatio) {
+    pixelRatio = next;
+    renderer.setPixelRatio(pixelRatio);
+    composer.setPixelRatio(pixelRatio);
+  }
+}
 
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
@@ -550,10 +591,14 @@ function animate() {
     state.quake *= Math.exp(-dt * 1.6);
   } else if (state.quake > 0) { state.quake = 0; world.position.set(0, 0, 0); }
 
+  adaptQuality(dt);
   controls.update(dt);
   composer.render(dt);
   requestAnimationFrame(animate);
 }
+
+// Dev-only handle for debugging in the browser console
+if (import.meta.env.DEV) window.mw = { scene, renderer, composer, bloom, clouds, atmosphere, state, CONFIG };
 
 // ───────────────────────────── START ─────────────────────────────
 function weekFromUrl() {
