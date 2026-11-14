@@ -1,0 +1,74 @@
+[
+ {
+  "date": "2008-10-10",
+  "title": "Sharpest fall of 2008",
+  "focus": "Financials",
+  "phase": "CRASH WEEK",
+  "risk": true,
+  "narration": "In the week ending 2008-10-10, the United Kingdom market moved -21.9% and Financials, the hardest-hit sector, moved -36.6%. Fear (realised vol) was 57. Average sector correlation was 0.75.",
+  "narrationSource": "data"
+ },
+ {
+  "date": "2008-10-31",
+  "title": "Peak fear",
+  "focus": "market",
+  "phase": "PEAK FEAR",
+  "risk": true,
+  "narration": "In the week ending 2008-10-31, the United Kingdom market moved +10.3%. Fear (realised vol) was 74. Average sector correlation was 0.78.",
+  "narrationSource": "data"
+ },
+ {
+  "date": "2009-01-30",
+  "title": "Strongest rebound of 2009",
+  "focus": "market",
+  "phase": "REBOUND",
+  "risk": false,
+  "narration": "In the week ending 2009-01-30, the United Kingdom market moved +11.3%. Fear (realised vol) was 41. Average sector correlation was 0.43.",
+  "narrationSource": "data"
+ },
+ {
+  "date": "2015-09-25",
+  "title": "Sectors most in sync",
+  "focus": "market",
+  "phase": "LOCKSTEP",
+  "risk": true,
+  "narration": "In the week ending 2015-09-25, the United Kingdom market moved -0.2%. Fear (realised vol) was 23. Average sector correlation was 0.91.",
+  "narrationSource": "data"
+ },
+ {
+  "date": "2017-01-13",
+  "title": "A quiet week in 2017",
+  "focus": "market",
+  "phase": "CALM",
+  "risk": false,
+  "narration": "In the week ending 2017-01-13, the United Kingdom market moved +1.3%. Fear (realised vol) was 5. Average sector correlation was 0.15.",
+  "narrationSource": "data"
+ },
+ {
+  "date": "2020-03-13",
+  "title": "Sharpest fall of 2020",
+  "focus": "Energy",
+  "phase": "PANDEMIC CRASH",
+  "risk": true,
+  "narration": "In the week ending 2020-03-13, the United Kingdom market moved -17.1% and Energy, the hardest-hit sector, moved -26.0%. Fear (realised vol) was 49. Average sector correlation was 0.87.",
+  "narrationSource": "data"
+ },
+ {
+  "date": "2020-04-10",
+  "title": "Strongest week of 2020",
+  "focus": "market",
+  "phase": "REBOUND",
+  "risk": false,
+  "narration": "In the week ending 2020-04-10, the United Kingdom market moved +10.8%. Fear (realised vol) was 56. Average sector correlation was 0.79.",
+  "narrationSource": "data"
+ },
+ {
+  "date": "2022-03-04",
+  "title": "Worst week since 2021",
+  "focus": "Financials",
+  "phase": "SELL-OFF",
+  "risk": true,
+  "narration": "In the week ending 2022-03-04, the United Kingdom market moved -6.7% and Financials, the hardest-hit sector, moved -14.7%. Fear (realised vol) was 30. Average sector correlation was 0.71.",
+  "narrationSource": "data"
+ }
+]
