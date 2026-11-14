@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import planetFragment from './shaders/planet.frag.glsl?raw';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
 // Tuned on real data 2007–2026 (see check_world.py output).
@@ -24,7 +25,7 @@ const CONFIG = {
   // Continental drift from average sector correlation (30-day window).
   //   pull = (corr - corrLow) / (corrHigh - corrLow), clamped to [0, 1]
   //   2017 ≈ 0.1 → spread out · Oct 2008 ≈ 0.77 · Mar 2020 ≈ 0.86 → supercontinent
-  drift: { corrLow: 0.25, corrHigh: 0.82, homeAngle: [0.95, 1.35], supercontinentAngle: 0.4 },
+  drift: { corrLow: 0.25, corrHigh: 0.82, homeAngle: [0.85, 1.2], supercontinentAngle: 0.4 },
 
   // Weather from VIX: storm = (vix - vixCalm) / vixRange, clamped to [0, 1]
   //   VIX 13 → clear blue sky · VIX 58+ → red sky, thick dark clouds
@@ -41,6 +42,7 @@ const CONFIG = {
   // Performance: render-resolution cap. Measured on Intel Arc iGPU at 2008-10-10:
   // 1.0 → 6.3 ms/frame, 1.5 → 8.6 ms, 2.0 → 13.8 ms. 1.5 keeps 60 fps with headroom.
   maxPixelRatio: 1.5,
+  planetLight: 1.5,         // sun strength in the planet shader (Gareth's was 3 with his own tone mapping)
 };
 
 const SECTOR_COLORS = {
@@ -79,7 +81,7 @@ controls.autoRotateSpeed = CONFIG.autoRotateSpeed;
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.7, 0.45, 0.82);
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.4, 0.95);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -138,79 +140,68 @@ const sunGlow = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16),
 sunGlow.position.copy(sunDir).multiplyScalar(140);
 scene.add(sunGlow);
 
-const ocean = new THREE.Mesh(new THREE.SphereGeometry(R, 96, 64),
-  new THREE.MeshStandardMaterial({ color: '#0b3c6e', roughness: 0.6, metalness: 0.05 }));
-world.add(ocean);
-
-// Faint latitude/longitude grid
-(function makeGrid() {
-  const pts = [];
-  const r = R * 1.002;
-  for (let lat = -60; lat <= 60; lat += 30) {
-    for (let lon = 0; lon < 360; lon += 4) {
-      for (const l of [lon, lon + 4]) {
-        const a = THREE.MathUtils.degToRad(lat), b = THREE.MathUtils.degToRad(l);
-        pts.push(r * Math.cos(a) * Math.sin(b), r * Math.sin(a), r * Math.cos(a) * Math.cos(b));
-      }
-    }
-  }
-  for (let lon = 0; lon < 180; lon += 30) {
-    for (let lat = 0; lat < 360; lat += 4) {
-      for (const l of [lat, lat + 4]) {
-        const a = THREE.MathUtils.degToRad(l), b = THREE.MathUtils.degToRad(lon);
-        pts.push(r * Math.cos(a) * Math.sin(b), r * Math.sin(a), r * Math.cos(a) * Math.cos(b));
-      }
-    }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-  world.add(new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: '#7fb0ff', transparent: true, opacity: 0.07 })));
-})();
-
-// Atmosphere rim: colour blue (calm) → red (fear)
+// Planet surface, ocean, clouds, atmosphere and volcanoes: Julien Sulpis' realtime planet
+// shader as adapted by Gareth (GPL-3.0, see NOTICES.md), driven by market data below.
+// Drawn on a back-faced sphere big enough to hold the atmosphere and ash plumes; the
+// shader ray-traces the real planet and writes depth so mesh mountains sit on it.
+function makeNoiseTexture() {
+  const size = 32, bytes = new Uint8Array(size ** 3);
+  let seed = 74777; // deterministic, same as Gareth's version
+  for (let i = 0; i < bytes.length; i++) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; bytes[i] = seed >>> 24; }
+  const tex = new THREE.Data3DTexture(bytes, size, size, size);
+  tex.format = THREE.RedFormat;
+  tex.minFilter = tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = tex.wrapR = THREE.RepeatWrapping;
+  tex.unpackAlignment = 1;
+  tex.needsUpdate = true;
+  return tex;
+}
 const ATMO_CALM = new THREE.Color('#4aa8ff');
-const ATMO_STORM = new THREE.Color('#ff3a2a');
-const atmosphere = new THREE.Mesh(new THREE.SphereGeometry(R * 1.07, 64, 48), new THREE.ShaderMaterial({
-  uniforms: { uColor: { value: ATMO_CALM.clone() }, uIntensity: { value: 1.0 } },
-  vertexShader: `varying vec3 vNormal;
-    void main() { vNormal = normalize(normalMatrix * normal);
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-  fragmentShader: `uniform vec3 uColor; uniform float uIntensity; varying vec3 vNormal;
-    void main() { float i = pow(clamp(0.62 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 0.0, 1.0), 4.0);
-      gl_FragColor = vec4(uColor * i * uIntensity * 1.1, 1.0); }`,
-  side: THREE.BackSide, blending: THREE.AdditiveBlending, transparent: true, depthWrite: false,
+const ATMO_STORM = new THREE.Color('#ff4a2a');
+const planetUniforms = {
+  uTime: { value: 0 },
+  uPlanetPosition: { value: new THREE.Vector3() },
+  uWorldRadius: { value: R },
+  uSunDirection: { value: sunDir },
+  uNoiseTexture: { value: makeNoiseTexture() },
+  uQuality: { value: 2 },
+  uProjection: { value: camera.projectionMatrix },
+  uNoiseStrength: { value: 0.17 },
+  uTerrainScale: { value: 0.8 },
+  uCloudsDensity: { value: 0.3 },
+  uCloudsScale: { value: 1 },
+  uCloudsSpeed: { value: 1.4 },
+  uAtmosphereColor: { value: ATMO_CALM.clone() },
+  uAtmosphereDensity: { value: 0.3 },
+  uSunIntensity: { value: 3 },
+  uAmbientLight: { value: 0.055 },
+  uStorm: { value: 0 }, uEruption: { value: 0 }, uFlash: { value: 0 }, uStress: { value: 0 },
+  uWaterDeep: { value: new THREE.Color(0.02, 0.05, 0.1) },
+  uWaterSurface: { value: new THREE.Color(0.05, 0.16, 0.3) },
+  uRockColor: { value: new THREE.Color(0.32, 0.29, 0.26) },
+  uAccent: { value: ATMO_CALM.clone() },
+  uContinentDir: { value: Array.from({ length: 6 }, () => new THREE.Vector3(0, 0, 1)) },
+  uContinentRot: { value: Array.from({ length: 6 }, () => new THREE.Matrix3()) },
+  uContinentColor: { value: Array.from({ length: 6 }, () => new THREE.Color()) },
+  uContinentCap: { value: 0.45 },
+  uVentDir: { value: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)] },
+};
+const planet = new THREE.Mesh(new THREE.SphereGeometry(R * 1.85, 48, 32), new THREE.ShaderMaterial({
+  glslVersion: THREE.GLSL3,
+  uniforms: planetUniforms,
+  vertexShader: `out vec3 vWorldPos;
+    void main() { vec4 wp = modelMatrix * vec4(position, 1.0); vWorldPos = wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }`,
+  // Three only gives projectionMatrix to vertex shaders; the fragment needs it for gl_FragDepth
+  fragmentShader: planetFragment.replace('projectionMatrix * viewMatrix', 'uProjection * viewMatrix')
+    .replace('uniform vec3 uVentDir[2];', 'uniform vec3 uVentDir[2];\nuniform mat4 uProjection;'),
+  side: THREE.BackSide,
+  depthWrite: true,
+  // premultiplied: planet pixels replace the background, atmosphere/ash glow adds over space
+  blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
 }));
-world.add(atmosphere);
-
-// Procedural clouds: coverage and darkness from VIX, flash from lightning
-const clouds = new THREE.Mesh(new THREE.SphereGeometry(R + 0.5, 96, 64), new THREE.ShaderMaterial({
-  uniforms: {
-    uTime: { value: 0 }, uCoverage: { value: 0.3 }, uDark: { value: 0 },
-    uFlash: { value: 0 }, uSunDir: { value: sunDir },
-  },
-  vertexShader: `varying vec3 vPos; varying vec3 vN;
-    void main() { vPos = position; vN = normalize(mat3(modelMatrix) * normal);
-      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-  fragmentShader: `uniform float uTime, uCoverage, uDark, uFlash; uniform vec3 uSunDir;
-    varying vec3 vPos; varying vec3 vN;
-    float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-    float noise(vec3 x) { vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
-      return mix(mix(mix(hash(i), hash(i + vec3(1,0,0)), f.x), mix(hash(i + vec3(0,1,0)), hash(i + vec3(1,1,0)), f.x), f.y),
-                 mix(mix(hash(i + vec3(0,0,1)), hash(i + vec3(1,0,1)), f.x), mix(hash(i + vec3(0,1,1)), hash(i + vec3(1,1,1)), f.x), f.y), f.z); }
-    float fbm(vec3 p) { float s = 0.0, a = 0.5; for (int i = 0; i < 4; i++) { s += a * noise(p); p *= 2.03; a *= 0.5; } return s / 0.94; }
-    void main() {
-      vec3 p = normalize(vPos);
-      float n = fbm(p * 3.2 + vec3(uTime * 0.015, 0.0, uTime * 0.008));
-      float edge = 1.0 - uCoverage;
-      float a = smoothstep(edge, edge + 0.22, n);
-      float light = clamp(dot(vN, uSunDir) * 0.75 + 0.4, 0.12, 1.0);
-      vec3 col = mix(vec3(1.0), vec3(0.16, 0.14, 0.17), uDark) * light;
-      col += uFlash * vec3(0.55, 0.6, 0.8) * a;
-      gl_FragColor = vec4(col, a * mix(0.7, 0.62, uDark));
-    }`,
-  transparent: true, depthWrite: false,
-}));
-world.add(clouds);
+planet.renderOrder = -1; // draw first; mountains and stars depth-test against its surface
+planet.frustumCulled = false;
+world.add(planet);
 
 // ───────────────────────────── CONTINENTS (sectors) ─────────────────────────────
 const CAP = 0.45;          // continent angular radius (radians)
@@ -288,6 +279,7 @@ function makeMountainGeometry(seed) {
 
 // ───────────────────────────── DATA → WORLD ─────────────────────────────
 const data = await fetch('/world.json').then((r) => r.json());
+let tours = []; // filled in the GUIDED TOURS section; declared early so key handlers never hit it uninitialised
 const N = data.dates.length;
 const stockIndex = Object.fromEntries(data.stocks.map((s) => [s.ticker, s]));
 
@@ -298,8 +290,10 @@ const continents = data.sectors.map((sector, i) => {
   const seed = i * 13.7 + 3.1;
   const tint = SECTOR_COLORS[sector.name] || '#88aa66';
   const group = new THREE.Group();
+  // Invisible pick target: the planet shader draws the land, this mesh only answers clicks
   const land = new THREE.Mesh(makeContinentGeometry(seed, tint, i * 0.004),
-    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, flatShading: true }));
+    new THREE.MeshBasicMaterial({ visible: false }));
+  planetUniforms.uContinentColor.value[i].set(tint);
   land.userData.sector = sector.name;
   group.add(land);
   world.add(group);
@@ -313,12 +307,10 @@ const continents = data.sectors.map((sector, i) => {
     const theta = (k / sector.tickers.length) * Math.PI * 2 + i;
     const angle = 0.17 + 0.03 * hash3(k, i, 1);
     const d = localDir(angle, theta, new THREE.Vector3());
-    const f = angle / coastRadius(theta, seed);
-    const ground = groundElevation(d, f, seed) + i * 0.004;
     const mat = new THREE.MeshStandardMaterial({ color: '#ffd23a', roughness: 0.7, flatShading: true,
       emissive: '#000000', emissiveIntensity: 1 });
     const mesh = new THREE.Mesh(makeMountainGeometry(k + i * 10), mat);
-    mesh.position.copy(d).multiplyScalar(R + ground - 0.03);
+    mesh.position.copy(d).multiplyScalar(R - 0.02); // shader surface is a sphere of radius R
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
     mesh.userData = { ticker, sector: sector.name, stock: stockIndex[ticker], height: 0.2, targetHeight: 0.2,
       color: new THREE.Color('#888888'), targetColor: new THREE.Color('#888888'), glow: 0, targetGlow: 0 };
@@ -353,6 +345,7 @@ const state = {
   storm: 0, targetStorm: 0,
   drift: 0, targetDrift: 0,
   quake: 0, flash: 0, vix: 15,
+  eruption: 0, targetEruption: 0, vents: [0, 1],
   selected: null,
   touring: false, tourStop: 0,
 };
@@ -367,6 +360,11 @@ function setWeek(i, { quake = true } = {}) {
   if (quake && i !== prev && m.ret[i] != null && m.ret[i] < CONFIG.quakeRet) {
     state.quake = Math.max(state.quake, Math.min(1, m.ret[i] / -0.15));
   }
+  // Volcanoes erupt in crash weeks, on the two sectors that fell hardest this week
+  const r = m.ret[i];
+  state.targetEruption = r != null && r < CONFIG.quakeRet
+    ? 0.55 + 0.45 * clamp01((CONFIG.quakeRet - r) / 0.08) : 0;
+  state.vents = data.sectors.map((sec, k) => [sec.ret[i] ?? 0, k]).sort((a, b) => a[0] - b[0]).slice(0, 2).map((x) => x[1]);
   for (const mesh of allMountains) {
     const u = mesh.userData, s = u.stock;
     const g = s ? s.growth[i] : null;
@@ -519,7 +517,7 @@ playBtn.addEventListener('keydown', (e) => { if (e.code === 'Space') e.preventDe
 // ───────────────────────────── GUIDED TOURS ─────────────────────────────
 // public/tours.json: [{ date, title, focus: "market" | sector | ticker, narration, narrationSource }]
 // Narrations are pre-generated (python -m server.make_tours) so the tour works offline.
-const tours = await fetch('/tours.json').then((r) => (r.ok ? r.json() : [])).catch(() => []);
+tours = await fetch('/tours.json').then((r) => (r.ok ? r.json() : [])).catch(() => []);
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const tourQ = new THREE.Quaternion(), tmpV = new THREE.Vector3();
 const fly = { active: false, t: 0, fromDir: new THREE.Vector3(), toDir: new THREE.Vector3(), fromDist: 0, toDist: 0 };
@@ -613,6 +611,7 @@ const clock = new THREE.Clock();
 const tmpQ = new THREE.Quaternion();
 const X = new THREE.Vector3(1, 0, 0);
 const FLASH_SKY = new THREE.Color('#3a3550');
+const tmpM4 = new THREE.Matrix4();
 
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
@@ -652,20 +651,37 @@ function animate() {
   state.storm += (state.targetStorm - state.storm) * k;
   const s = state.storm;
   scene.background.copy(SKY_CALM).lerp(SKY_STORM, s);
-  atmosphere.material.uniforms.uColor.value.copy(ATMO_CALM).lerp(ATMO_STORM, s);
-  atmosphere.material.uniforms.uIntensity.value = 0.9 + 0.6 * s;
-  const cu = clouds.material.uniforms;
-  cu.uTime.value = t;
-  cu.uCoverage.value = CONFIG.clouds.calm + (CONFIG.clouds.storm - CONFIG.clouds.calm) * s;
-  cu.uDark.value = Math.min(1, s * 1.2);
+  const pu = planetUniforms;
+  pu.uTime.value = t;
+  pu.uStorm.value = s;                                           // dark storm fronts
+  pu.uStress.value = s;
+  pu.uCloudsDensity.value = CONFIG.clouds.calm + (CONFIG.clouds.storm - CONFIG.clouds.calm) * s;
+  pu.uAtmosphereColor.value.copy(ATMO_CALM).lerp(ATMO_STORM, s); // blue → red with fear
+  pu.uAccent.value.copy(pu.uAtmosphereColor.value);
+  pu.uSunIntensity.value = CONFIG.planetLight * (1 - 0.55 * s);    // storms dim the sun
+  pu.uAmbientLight.value = 0.055 + 0.025 * s;
   sun.intensity = 2.4 - 1.1 * s;
+
+  // Continents for the shader: centre direction + world→local rotation (terrain drifts with them)
+  pu.uPlanetPosition.value.copy(world.position);
+  for (let c = 0; c < continents.length; c++) {
+    const q = continents[c].group.quaternion;
+    pu.uContinentDir.value[c].copy(Z).applyQuaternion(q);
+    tmpM4.makeRotationFromQuaternion(tmpQ.copy(q).invert());
+    pu.uContinentRot.value[c].setFromMatrix4(tmpM4);
+  }
+
+  // Volcanoes (crash weeks) on the worst-hit sectors' continents
+  state.eruption += (state.targetEruption - state.eruption) * k;
+  pu.uEruption.value = state.eruption;
+  for (let v = 0; v < 2; v++) pu.uVentDir.value[v].copy(pu.uContinentDir.value[state.vents[v]]);
 
   // Lightning: random flashes while VIX is above the threshold
   if (state.vix > CONFIG.lightningVix && Math.random() < dt * (0.4 + (state.vix - CONFIG.lightningVix) * 0.04)) {
     state.flash = 1;
   }
   state.flash *= Math.exp(-dt * 14);
-  cu.uFlash.value = state.flash;
+  pu.uFlash.value = state.flash;
   ambient.intensity = 0.55 + state.flash * 1.5;
   scene.background.lerp(FLASH_SKY, state.flash * 0.6);
 
@@ -683,7 +699,7 @@ function animate() {
 }
 
 // Dev-only handle for debugging in the browser console
-if (import.meta.env.DEV) window.mw = { scene, camera, controls, continents, renderer, composer, bloom, clouds, atmosphere, state, CONFIG };
+if (import.meta.env.DEV) window.mw = { scene, camera, controls, continents, planet, planetUniforms, renderer, composer, bloom, state, CONFIG };
 
 // ───────────────────────────── START ─────────────────────────────
 function weekFromUrl() {
