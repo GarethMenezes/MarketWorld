@@ -411,8 +411,13 @@ const continents = data.sectors.map((sector, i) => {
   const tint = SECTOR_COLORS[sector.name] || '#88aa66';
   const group = new THREE.Group();
   // Invisible pick target: the planet shader draws the land, this mesh only answers clicks
-  const land = new THREE.Mesh(makeContinentGeometry(seed, tint, i * 0.004),
-    new THREE.MeshBasicMaterial({ visible: false }));
+  const landGeo = makeContinentGeometry(seed, tint, i * 0.004);
+  // Flatten onto the shader's surface (radius R): the old terrain heights buried short mountains
+  // inside this invisible mesh, so clicks on them selected the sector instead of the company
+  const lp = landGeo.attributes.position, lv = new THREE.Vector3();
+  for (let v = 0; v < lp.count; v++) { lv.fromBufferAttribute(lp, v).setLength(R + 0.002); lp.setXYZ(v, lv.x, lv.y, lv.z); }
+  landGeo.computeBoundingSphere();
+  const land = new THREE.Mesh(landGeo, new THREE.MeshBasicMaterial({ visible: false }));
   planetUniforms.uContinentColor.value[i].set(tint);
   const sectorLabel = makeLabel(sector.name, 'sec');
   sectorLabel.position.set(0, 0, R + 0.25); // continent centre (mountains ring around it)
@@ -434,10 +439,13 @@ const continents = data.sectors.map((sector, i) => {
       color: '#ffd23a', transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
     ring.position.copy(d).multiplyScalar(R + 0.012);
     ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+    ring.userData = { ticker, sector: sector.name };   // clicking the ring picks the company
     group.add(ring);
     // US: tickers are familiar; other markets: company names ("7203.T" means nothing to most people)
     const label = makeLabel(MARKET.id === 'us' ? ticker : COMPANY[ticker], 'tk', `${COMPANY[ticker]} (${ticker})`);
     label.position.set(0, 1.08, 0); // just above the peak; follows the mountain's height
+    label.element.classList.add('clickable');                 // clicking the name picks the company
+    label.element.addEventListener('click', (ev) => { ev.stopPropagation(); if (!state.sandbox) select({ ticker, sector: sector.name }); });
     mesh.add(label);
     mesh.position.copy(d).multiplyScalar(R - 0.02); // shader surface is a sphere of radius R
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
@@ -450,7 +458,7 @@ const continents = data.sectors.map((sector, i) => {
   return { sector, group, land, mountains, sectorLabel };
 });
 const allMountains = continents.flatMap((c) => c.mountains);
-const pickables = [...allMountains, ...continents.map((c) => c.land)]; // craters are added below
+const pickables = [...allMountains, ...allMountains.map((m) => m.userData.ring), ...continents.map((c) => c.land)]; // craters are added below
 
 // ───────────────────────────── MAPPINGS (data → visual targets) ─────────────────────────────
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
@@ -855,6 +863,18 @@ const pickSurface = new THREE.Sphere(new THREE.Vector3(), R * 0.995), pickPoint 
 const pointer = new THREE.Vector2();
 let downAt = null;
 canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+// Mountain whose foot is within reach of a surface point (or null)
+const footPos = new THREE.Vector3();
+function nearestMountain(point) {
+  let best = null, bestD = Infinity;
+  for (const m of allMountains) {
+    if (!m.visible) continue;
+    m.getWorldPosition(footPos);
+    const d = footPos.distanceTo(point), reach = MOUNTAIN_RADIUS * m.scale.x * 1.5;
+    if (d < reach && d < bestD) { best = m; bestD = d; }
+  }
+  return best;
+}
 canvas.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   const rect = canvas.getBoundingClientRect();
@@ -865,9 +885,13 @@ canvas.addEventListener('pointerup', (e) => {
   const groundDist = ground ? raycaster.ray.origin.distanceTo(pickPoint) : Infinity;
   const hits = raycaster.intersectObjects(pickables, false)
     .filter((h) => h.object.visible && (h.object.userData.marketId || h.distance <= groundDist + 0.15));
-  // Craters lie flat on the surface, under the (invisible) continent pick mesh: let them win
-  const hit = hits.find((h) => h.object.userData.crater) ?? hits[0];
+  // Priority: crater, then a company (mountain or its ring), then the sector underneath
+  let hit = hits.find((h) => h.object.userData.crater) ?? hits.find((h) => h.object.userData.ticker) ?? hits[0];
   if (!hit) return;
+  if (!hit.object.userData.ticker && !hit.object.userData.crater && !hit.object.userData.marketId) {
+    const near = nearestMountain(hit.point);                     // a click right at a mountain's foot
+    if (near) hit = { object: near };
+  }
   const u = hit.object.userData;
   if (u.marketId) { goToMarket(u.marketId); return; }
   if (state.sandbox) return;
