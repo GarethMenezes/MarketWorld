@@ -161,6 +161,44 @@ def api_explain(req: ExplainRequest):
     return explain(req.ticker, req.sector, req.week)
 
 
+# ───────────── Ask the planet ─────────────
+from server.ask import Asker, NO_ADVICE, is_advice  # noqa: E402
+
+_tours_path = Path(__file__).parent.parent / "public" / "tours.json"
+TOURS = json.loads(_tours_path.read_text(encoding="utf-8")) if _tours_path.exists() else []
+ASKER = Asker(WORLD, TOURS, gather, template)
+_ask_cache: dict[str, dict] = {}
+
+
+class AskRequest(BaseModel):
+    question: str
+
+
+@app.post("/api/ask")
+def api_ask(req: AskRequest):
+    q = req.question.strip()[:300]
+    key = q.lower()
+    if key in _ask_cache:
+        return _ask_cache[key]
+    if not q:
+        return ASKER.respond(None, "market", "Ask me about a week in market history.", "fallback")
+    if is_advice(q):  # never ask the LLM for advice
+        return ASKER.respond(None, "market", NO_ADVICE, "fallback")
+    result = None
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        try:
+            raw = _pool.submit(call_llm, ASKER.prompt(q)).result(timeout=TIMEOUT_S)
+            result = ASKER.from_llm(raw)
+        except FutureTimeout:
+            print(f"ask: LLM timeout for {q!r}; using keyword fallback")
+        except Exception as e:  # invalid JSON, bad week, API error → fallback, never an error
+            print(f"ask: LLM failed for {q!r}: {type(e).__name__}: {e}")
+    if result is None:
+        result = ASKER.fallback(q)
+    _ask_cache[key] = result
+    return result
+
+
 @app.get("/api/health")
 def health():
     return {"ok": True, "model": MODEL, "ai": bool(os.environ.get("ANTHROPIC_API_KEY"))}

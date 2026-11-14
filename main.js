@@ -9,6 +9,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import planetFragment from './shaders/planet.frag.glsl?raw';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createSandbox } from './sandbox.js';
+import { createAsk } from './ask.js';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
 // Tuned on real data 2007–2026 (see check_world.py output).
@@ -673,7 +674,8 @@ function focusDirection(focus, out) {
   return out.copy(PLATE_DIRS[k]);
 }
 
-function startFly(dir, dist) {
+function startFly(dir, dist, seconds = CONFIG.tour.flySeconds) {
+  fly.seconds = seconds;
   fly.fromDist = camera.position.length();
   fly.fromDir.copy(camera.position).normalize();
   fly.toDir.copy(dir).normalize();
@@ -684,7 +686,7 @@ function startFly(dir, dist) {
 
 function updateFly(dt) {
   if (!fly.active) return;
-  fly.t = Math.min(1, fly.t + dt / CONFIG.tour.flySeconds);
+  fly.t = Math.min(1, fly.t + dt / fly.seconds);
   const e = fly.t < 0.5 ? 2 * fly.t * fly.t : 1 - (-2 * fly.t + 2) ** 2 / 2; // ease in-out
   tmpV.copy(fly.fromDir).lerp(fly.toDir, e).normalize();
   camera.position.copy(tmpV).multiplyScalar(fly.fromDist + (fly.toDist - fly.fromDist) * e);
@@ -831,6 +833,19 @@ const sandbox = stress ? createSandbox({
   },
 }) : null;
 if (!stress) $('whatIfBtn').style.display = 'none';
+
+// ───────────────────────────── ASK THE PLANET ─────────────────────────────
+createAsk({
+  $, data, fmtDate,
+  go(weekIndex, focus) {
+    if (sandbox?.isActive()) sandbox.close();
+    if (state.touring) exitTour();
+    setPlaying(false);
+    setWeek(weekIndex);
+    controls.autoRotate = false;
+    startFly(focusDirection(focus, tmpV), focus === 'market' ? CONFIG.tour.marketDistance : CONFIG.tour.focusDistance, 1.5);
+  },
+});
 
 // ───────────────────────────── ANIMATION ─────────────────────────────
 const clock = new THREE.Clock();
