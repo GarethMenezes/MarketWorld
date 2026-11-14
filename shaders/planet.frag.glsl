@@ -54,6 +54,9 @@ uniform mat3 uContinentRot[6];  // world → continent-local rotation
 uniform vec3 uContinentColor[6];
 uniform float uContinentCap;    // continent angular radius (radians)
 uniform vec3 uVentDir[2];       // volcano axes (unit vectors, world)
+uniform sampler2D uOceanPalette;
+uniform float uShowReferenceCoast;
+uniform float uSectorShock[6];
 uniform float uSeaLevel;        // current sea level in altitude units (0 = normal); falls with correlation
 
 // Shader works in the original units: planet radius 2 at the origin.
@@ -147,19 +150,31 @@ float continentShape(vec3 local, int i, out float islands) {
 
 // Altitude in the original shader's units (land > SAND_LEVEL)
 float terrainAltitude(vec3 n, out int best) {
-  float bd;
-  best = nearestContinent(n, bd);
-  vec3 local = uContinentRot[best] * n;                // continent frame (centre = +Z)
-  vec3 seed = vec3(float(best) * 17.3, float(best) * 5.1, 0.);
-  float islands;
-  float ang = continentShape(local, best, islands);
-  float mask = max(1. - smoothstep(.9, 1.0, ang), islands);
-  float h = fbm(local * R_PLANET * uTerrainScale + seed, 6, .5, 2., 5.) * uNoiseStrength * 5.;
-  float land = SAND_LEVEL + .008 + h * 1.25 * max(smoothstep(1.0, .55, ang), islands * .4); // flatter near the coast
-  // Ocean floor: deep, rising to a narrow continental shelf near the coast (exposed when the sea falls)
-  float floorNoise = (noise(n * 7. + 2.) - .5) * .03;
-  float ocean = mix(-.15 + floorNoise, -.034, smoothstep(1.22, 1.0, ang));
-  return mix(ocean, land, mask);
+  // Union of local continent fields. Selecting only the nearest centre made
+  // straight seams wherever two procedural regions met in the ocean.
+  float floorNoise=(noise(n*7.+2.)-.5)*.03;
+  float oceanFloor=-.15+floorNoise;
+  float altitude=oceanFloor;best=0;
+  for(int i=0;i<6;i++){
+    float alignment=dot(n,uContinentDir[i]);
+    if(alignment<.45)continue;
+    vec3 local=uContinentRot[i]*n;
+    vec3 seed=vec3(float(i)*17.3,float(i)*5.1,0.);
+    float islands;
+    float ang=continentShape(local,i,islands);
+    float mask=max(1.-smoothstep(.9,1.,ang),islands);
+    float shelf=1.-smoothstep(.99,1.52,ang);
+    float ocean=mix(oceanFloor,-.018,shelf)+(noise(n*32.+4.)-.5)*.009*shelf;
+    float land=SAND_LEVEL+.008;
+    if(mask>.001){
+      float h=fbm(local*R_PLANET*uTerrainScale+seed,6,.5,2.,5.)*uNoiseStrength*5.;
+      land+=h*1.25*max(1.-smoothstep(.55,1.,ang),islands*.4);
+    }
+    float candidate=mix(ocean,land,mask);
+    candidate=mix(oceanFloor,candidate,smoothstep(.45,.65,alignment));
+    if(candidate>altitude){altitude=candidate;best=i;}
+  }
+  return altitude;
 }
 float planetNoise(vec3 p) { int b; return terrainAltitude(normalize(p), b) / 5.; }
 
@@ -173,19 +188,38 @@ vec3 planetNormal(vec3 p) {
   return normalize(n - t * (ht - h) / e - b * (hb - h) / e);
 }
 
-vec3 atmosphereColor(vec3 ro, vec3 rd, float spaceMask) {
-  float distCam = length(ro);
-  float distEdge = sqrt(max(distCam * distCam - R_PLANET * R_PLANET, 0.));
-  vec3 coordFromCenter = ro + rd * distEdge;
-  float distFromEdge = abs(length(coordFromCenter) - R_PLANET);
-  float planetEdge = max(R_PLANET - distFromEdge, 0.) / R_PLANET;
-  float planetMask = 1.0 - spaceMask;
-  float atmosphereMask = pow(max(0., remap(dot(uSunDirection, coordFromCenter), -R_PLANET, R_PLANET / 2., 0., 1.)), 5.);
-  atmosphereMask = max(atmosphereMask, .18) * uAtmosphereDensity * R_PLANET * uSunIntensity; // keep a faint rim on the night side
-  vec3 a = vec3(pow(planetEdge, 120.)) * .5;
-  a += pow(planetEdge, 50.) * .3 * (1.5 - planetMask);
-  a += pow(planetEdge, 22.) * .025;    // thin rim
-  return a * uAtmosphereColor * atmosphereMask;
+// Rayleigh and Henyey-Greenstein phase functions adapted from Three.js r170
+// examples/jsm/objects/Sky.js (MIT). Bounded six-sample spherical integration.
+float rayleighPhase(float c) { return .05968310365946075 * (1. + c*c); }
+float hgPhase(float c,float g) {
+ float g2=g*g;
+ return .07957747154594767 * (1.-g2) / pow(max(.001,1.-2.*g*c+g2),1.5);
+}
+vec3 atmosphereColor(vec3 ro,vec3 rd,float spaceMask) {
+ float radius=R_PLANET+.14;
+ float b=dot(ro,rd),h=b*b-dot(ro,ro)+radius*radius;
+ if(h<=0.)return vec3(0.);
+ float start=max(0.,-b-sqrt(h)),end=-b+sqrt(h);
+ float ground=sphIntersect(ro,rd,vec3(0.),R_PLANET);
+ if(ground>0.)end=min(end,ground);
+ float stepLength=max(0.,end-start)/6.;
+ vec3 beta=mix(vec3(3.0,6.5,13.0),uAtmosphereColor*9.,uStorm*.48);
+ vec3 sum=vec3(0.);float optical=0.;
+ float phase=rayleighPhase(dot(rd,uSunDirection));
+ float mie=hgPhase(dot(rd,uSunDirection),.72);
+ for(int i=0;i<6;i++){
+  vec3 p=ro+rd*(start+(float(i)+.5)*stepLength);
+  float height=clamp((length(p)-R_PLANET)/.14,0.,1.);
+  float density=exp(-height*4.)*(1.-height);
+  optical+=density*stepLength;
+  float sunHit=sphIntersect(p+normalize(p)*.001,uSunDirection,vec3(0.),R_PLANET);
+  if(sunHit>0.)continue;
+  float mu=dot(normalize(p),uSunDirection);
+  float sunDepth=density*.025/max(.08,mu);
+  vec3 extinction=exp(-beta*(optical+sunDepth));
+  sum+=extinction*density*stepLength*(beta*phase+vec3(.4)*mie);
+ }
+ return sum*uSunIntensity*2.2;
 }
 
 //=========== Volcanoes — Gareth's additions; profile adapted from TerraForge3D ===========//
@@ -277,6 +311,14 @@ vec4 volcanicAtmosphere(vec3 ro, vec3 rd, vec4 background, float sceneDepth) {
   return result;
 }
 
+// Smooth water normals are independent of the rocky seabed.
+vec3 waterNormal(vec3 n) {
+ vec3 a=normalize(vec3(.8,.2,.6)),b=normalize(vec3(-.3,.9,.4));
+ float amp=mix(.009,.024,uStorm);
+ vec3 gradient=a*cos(dot(n,a)*145.+uTime*.7)*amp;
+ gradient+=b*cos(dot(n,b)*230.-uTime*.9)*amp*.5;
+ return normalize(n-(gradient-n*dot(n,gradient)));
+}
 //========================== Ray tracing ==========================//
 Hit intersectPlanet(vec3 ro, vec3 rd) {
   float len = sphIntersect(ro, rd, vec3(0.), R_PLANET);
@@ -285,37 +327,46 @@ Hit intersectPlanet(vec3 ro, vec3 rd) {
   vec3 n = normalize(position);
   int best;
   float altitude = terrainAltitude(n, best);
-  vec3 normal = planetNormal(position);
-
-  vec3 tree = uContinentColor[best] * .35;                       // each sector its own colour
-  vec3 rock = mix(uRockColor, uContinentColor[best] * .5, .35);
-  // ── Sea level: water where the terrain is below uSeaLevel, coloured by depth
-  float depth = uSeaLevel - altitude;                                  // > 0 under water
-  vec3 color = mix(uWaterSurface, uWaterDeep, smoothstep(0., .09, depth));
-  float above = smoothstep(.0008, -.0008, depth);                      // 1 = above the current sea
-  float seabed = 1. - smoothstep(-.003, .003, altitude - WATER_SURFACE_LEVEL); // 1 = below the normal shoreline
-
-  // Exposed seabed: wet sand at the waterline drying to white salt flats (distinct from land)
-  float dryness = smoothstep(0., .03, -depth) * (.55 + .45 * noise(n * 34.));
-  vec3 flats = mix(vec3(.30, .26, .19), vec3(.80, .74, .6), dryness);       // wet sand → pale salt flats
-  color = mix(color, flats, above * seabed);
-
-  // Continents above the normal shoreline keep their normal colours
-  vec3 landCol = mix(SAND_COLOR, tree, smoothstep(TREE_LEVEL, TREE_LEVEL + TRANSITION, altitude));
-  landCol = mix(landCol, rock, smoothstep(ROCK_LEVEL, ROCK_LEVEL + TRANSITION, altitude));
-  landCol = mix(landCol, ICE_COLOR, smoothstep(ICE_LEVEL, ICE_LEVEL + TRANSITION, altitude));
-  color = mix(color, landCol, above * (1. - seabed));
-
-  // Foam line where the sea meets the shore, and a faint ring at the normal shoreline
-  float foam = (1. - smoothstep(0., .0035, abs(depth))) * (.55 + .45 * noise(n * 70. + uTime * .25));
-  color = mix(color, vec3(.95, .97, 1.), foam * .85);
-  float lowered = smoothstep(-.002, -.012, uSeaLevel);
-  float normalShore = (1. - smoothstep(0., .0025, abs(altitude - WATER_SURFACE_LEVEL))) * lowered * above;
-  color = mix(color, vec3(.7, .82, .95), normalShore * .35);
+  vec3 terrainN=n;
+  vec3 tree=uContinentColor[best]*.35;
+  vec3 rock=mix(uRockColor,uContinentColor[best]*.5,.35);
+  // Sea Level Explorer: classify and colour by elevation relative to water.
+  float depth=uSeaLevel-altitude;
+  float pixel=clamp(fwidth(altitude),.00035,.008);
+  float above=1.-smoothstep(-pixel,pixel,depth);
+  if(above>.01)terrainN=planetNormal(position);
+  float seabed=1.-smoothstep(-pixel,pixel,altitude);
+  vec3 color=texture(uOceanPalette,vec2(clamp(depth/.18,0.,1.),.5)).rgb;
+  // Fresnel reflectance adapted from Three.js r170 Water.js (MIT).
+  float theta=max(dot(n,-rd),0.);
+  float reflectance=.02+.98*pow(1.-theta,5.);
+  color=mix(color,vec3(.055,.15,.23),reflectance*.42);
+  float dryness=smoothstep(.001,.04,-depth);
+  float grain=.86+.14*noise(n*70.);
+  vec3 flats=mix(vec3(.16,.14,.10),vec3(.53,.43,.28),dryness)*grain;
+  color=mix(color,flats,above*seabed);
+  vec3 landCol=mix(vec3(.55,.46,.30),tree,smoothstep(TREE_LEVEL,TREE_LEVEL+TRANSITION,altitude));
+  landCol=mix(landCol,rock,smoothstep(ROCK_LEVEL,ROCK_LEVEL+TRANSITION,altitude));
+  landCol=mix(landCol,ICE_COLOR,smoothstep(ICE_LEVEL,ICE_LEVEL+TRANSITION,altitude));
+  float sectorMove=uSectorShock[best];
+  landCol=mix(landCol,sectorMove<0.?vec3(.28,.025,.015):vec3(.035,.28,.09),clamp(abs(sectorMove)*2.3,0.,.85));
+  color=mix(color,landCol,above*(1.-seabed));
+  float shoreWidth=max(.0007,pixel*.85);
+  float foam=(1.-smoothstep(0.,shoreWidth*1.7,abs(depth)))*(.55+.45*noise(n*70.+uTime*.25));
+  color=mix(color,vec3(.65,.82,.83),foam*.42);
+  // Sea Level Explorer reference coast: dark casing + 75%-white core.
+  float lowered=smoothstep(.002,.012,-uSeaLevel)*uShowReferenceCoast;
+  float refWidth=max(.00035,pixel*.6);
+  float reference=1.-smoothstep(refWidth*.35,refWidth*1.2,abs(altitude));
+  float casing=1.-smoothstep(refWidth*1.2,refWidth*2.5,abs(altitude));
+  color=mix(color,mix(color,vec3(.003),.5),casing*lowered*above);
+  color=mix(color,mix(color,vec3(1.),.75),reference*lowered*above);
+  vec3 normal=normalize(mix(waterNormal(n),terrainN,above));
 
   // Polar ice caps (planet axis = world Y), ragged edges
   float ice = smoothstep(.84, .9, abs(n.y) + (noise(n * 9.) - .5) * .12 + (noise(n * 31.) - .5) * .04);
   color = mix(color, vec3(.86, .91, .96), ice);
+  normal=normalize(mix(normal,n,ice));
 
   // Clouds: density from VIX (uCloudsDensity), darker with storm
   vec3 cloudsCoord = (n * R_PLANET + vec3(uTime * .008 * uCloudsSpeed)) * uCloudsScale;
@@ -323,10 +374,10 @@ Hit intersectPlanet(vec3 ro, vec3 rd) {
   float threshold = 1. - uCloudsDensity * .5;
   clouds *= smoothstep(threshold, threshold + .1, clouds);
   vec3 cloudColor = mix(CLOUD_COLOR, vec3(.10, .13, .17), uStorm * .88);
-  color = mix(color, cloudColor, clouds);
+  color = mix(color, cloudColor, clouds * mix(.38,.72,above));
   float front = fbm(n * R_PLANET * 2. + vec3(uTime * .014, 0., 0.), 4, .55, 2., 1.);
   float stormCover = smoothstep(.35, .66, front) * uStorm;
-  color = mix(color, cloudColor, stormCover * .83);
+  color = mix(color, cloudColor, stormCover * .48);
   color += vec3(.35, .45, .7) * uFlash * max(stormCover, clouds) * 1.2;     // lightning (VIX > 40)
   float coastGlow = 1. - smoothstep(.002, .012, abs(altitude - SAND_LEVEL));
   color += uAccent * coastGlow * uStress * .18;
@@ -350,17 +401,17 @@ void main() {
   if(hit.len < INFINITY) {
     spaceMask = 0.;
     vec3 hitPosition = ro + hit.len * rd;
-    float direct = pow(clamp(dot(hit.normal, uSunDirection), 0.0, 1.0), 2.) * uSunIntensity;
+    float direct = max(dot(hit.normal, uSunDirection), 0.) * uSunIntensity;
     vec3 diffuse = hit.material.color * (uAmbientLight + direct * SUN_COLOR);
     vec3 reflected = normalize(reflect(-uSunDirection, hit.normal));
-    float spec = max(0.0, dot(rd, reflected));
-    float glint = pow(spec, 120.) * 1.6 + pow(spec, 14.) * .06;         // sunlight glinting off the ocean
+    float spec = max(0.0, dot(-rd, reflected));
+    float glint = (pow(spec,120.)*.7+pow(spec,14.)*.045)*smoothstep(0.,.15,dot(hit.normal,uSunDirection));         // sunlight glinting off the ocean
     color = vec4(diffuse + hit.material.specular * glint * uSunIntensity * SUN_COLOR, 1.);
     // Atmospheric haze: thicker towards the limb, on the day side (gives the planet depth)
     vec3 sphereN = normalize(hitPosition);
     float limb = pow(1. - max(dot(sphereN, -rd), 0.), 2.5);
     float day = smoothstep(-.15, .35, dot(sphereN, uSunDirection));
-    color.rgb += uAtmosphereColor * limb * day * .28 * uSunIntensity / 1.5;
+    color.rgb += uAtmosphereColor * limb * day * .07 * uSunIntensity / 1.5;
     if(length(hitPosition) < R_PLANET + .4) color.rgb += lavaEmission(hitPosition);
   }
   color.rgb += atmosphereColor(ro, rd, spaceMask) * (1. - uStorm * .55);

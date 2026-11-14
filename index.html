@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#000000" />
   <title>Market Worlds</title>
-  <meta name="description" content="Twenty years of real US stock market data as a living planet. A DurHack 2026 project." />
+  <meta name="description" content="Explore UK, US and Asian market history as three living planets. A DurHack 2026 project." />
   <style>
     :root {
       color-scheme: dark;
@@ -76,6 +76,57 @@
     .fine { margin-top: 18px; color: var(--dim); font-size: 10.5px; line-height: 1.7; }
     .fine a { text-decoration: none; border-bottom: 1px solid var(--line2); }
 
+    [hidden] { display: none !important; }
+    .world-heading { pointer-events: none; }
+    .world-heading h1 { font-size: 24px; letter-spacing: -.7px; font-weight: 450; margin: 2px 0; color: #e8f5ff; }
+    .world-heading>.mono { font-size: 9px; }
+    .market-nav { display: flex; gap: 4px; margin-top: 12px; pointer-events: auto; }
+    .market-nav button { border: 1px solid #344350; background: #08131ab3; color: #adc3d0; border-radius: 18px; padding: 5px 13px; font-size: 11px; }
+    .market-nav button[aria-pressed=true] { color: #071c25; background: #a9d7e9; border-color: #a9d7e9; }
+    .market-label { font: 10px ui-monospace,monospace; letter-spacing: 2px; color: #b4ddf0; text-shadow: 0 2px 7px #000; white-space: nowrap; }
+    .panel-tools { padding: 18px 0 3px; display: flex; align-items: center; gap: 10px; }
+    .action-button { background: #a9d7e9; border: 0; color: #092332; border-radius: 6px; padding: 8px 13px; font-size: 12px; white-space: nowrap; }
+    .action-button:disabled { opacity: .4; cursor: default; }
+    .market-note { color: var(--muted); font-size: 10px; line-height: 1.5; }
+    .sandbox h2 { margin-top: 10px; }
+    .sandbox label { display: block; font-size: 12px; color: #a8b9c3; margin: 14px 0 7px; }
+    .sandbox select { width: 100%; background: #101a20; border: 1px solid #34414b; border-radius: 5px; padding: 8px; color: var(--text); font: inherit; }
+    .sandbox input[type=range] { width: 100%; accent-color: var(--red); }
+    .shock-heading { display: flex; justify-content: space-between; align-items: baseline; }
+    .shock-heading output { font-variant-numeric: tabular-nums; color: var(--red); }
+    #sandboxSummary { margin: 16px 0; font-size: 12px; }
+    .stress-results { list-style: none; padding: 0; margin: 0; }
+    .stress-results li { display: grid; grid-template-columns: 1fr auto; gap: 5px; padding: 9px 0; border-top: 1px solid #223039; font-size: 12px; }
+    .stress-results strong { font-weight: 500; font-variant-numeric: tabular-nums; }
+    .stress-results i { height: 3px; grid-column: 1 / -1; border-radius: 2px; transition: width 400ms ease; }
+    .stress-results .loss { background: var(--red); }.stress-results .gain { background: var(--accent); }
+    .sea-scale { margin: 14px 0 6px; padding: 13px 12px; border: 1px solid #213038; border-radius: 8px; background: #080e13; }
+    .sea-scale .mono { font-size: 9px; letter-spacing: .7px; color: #aac4d3; }
+    .sea-scale meter { display: block; width: 100%; height: 8px; margin: 9px 0 4px; accent-color: #7bc4df; }
+    .sea-scale meter::-webkit-meter-bar { border: 0; background: #1a2d3b; border-radius: 6px; }
+    .sea-scale meter::-webkit-meter-optimum-value { background: linear-gradient(90deg,#4b99ba,#dec495); border-radius: 6px; }
+    .sea-endpoints { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+    .sea-key { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 11px 0 8px; font-size: 10px; color: #a7b6bf; }
+    .sea-key i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; }
+    .sea-key .water { background: #3887c0; }.sea-key .shelf { background: #c6a471; }
+    .coast-toggle { display: flex; gap: 7px; align-items: center; font-size: 11px; color: #c6d0d5; cursor: pointer; }
+    .coast-toggle input { margin: 0; accent-color: #8fcce0; }
+    .sea-scale small { display: block; color: #8295a0; font-size: 10px; margin-top: 7px; }
+    .date-form button { display: inline-block; border: 1px solid #344350; background: #172631; border-radius: 14px; font-size: 10px; }
+    @media(max-width:900px) {
+      .planet-wrap { height: 78svh; min-height: 470px; }
+      .world-heading h1 { font-size: 20px; }
+      .tl { top: 14px; left: 16px; }
+      .overlay.tr { top: 18px; right: 12px; }
+      .date-form { display: flex !important; }
+      .date-form input { width: 125px; font-size: 10px; }
+      .date-form button { display: none; }
+      .overlay.bl { font-size: 8px; left: 14px; bottom: 46px; }
+      .overlay.br { bottom: 10px; right: 12px; }
+      .story { padding: 5px 18px 24px; }
+      .market-nav button { padding: 4px 10px; }
+    }
+
     /* Timebar */
     .timebar { position: fixed; bottom: 0; left: 0; right: 0; height: var(--timebar); display: flex; align-items: center; gap: 20px;
       background: #000; border-top: 1px solid var(--line); padding: 0 22px; }
@@ -113,7 +164,7 @@
     <section class="planet-wrap" aria-label="Interactive market planet">
       <canvas id="scene" tabindex="0" aria-label="3D planet built from stock market data. Drag to rotate, scroll to zoom, click a mountain for details."></canvas>
       <div class="label-layer" id="labels"></div>
-      <div class="overlay tl mono">Week <b id="weekNo">—</b> / <span id="weekTotal">—</span></div>
+      <div class="overlay tl world-heading"><span class="mono">MARKET WORLDS</span><h1 id="marketName">United Kingdom</h1><div class="mono">WEEK <b id="weekNo">—</b> / <span id="weekTotal">—</span></div><nav id="marketNav" class="market-nav" aria-label="Choose a market planet"></nav></div>
       <div class="overlay tr">
         <form id="dateForm" class="date-form"><label for="jumpDate" class="mono" style="position:absolute;left:-9999px">Travel to a date</label>
           <input id="jumpDate" type="date" required title="Travel to a date" /><button type="submit">Go</button></form>
@@ -128,6 +179,21 @@
     </section>
 
     <aside class="story" id="story">
+      <div class="panel-tools"><button id="sandboxBtn" class="action-button">What if?</button><span id="marketNote" class="market-note"></span></div>
+      <article id="sandbox" class="card sandbox" hidden>
+        <button class="close" id="sandboxExit" aria-label="Exit stress sandbox">×</button>
+        <div class="mono up">WHAT IF? · HISTORICAL MODEL</div>
+        <h2>One shock.<br>Different worlds.</h2>
+        <label for="shockSector">Shock a sector</label><select id="shockSector"></select>
+        <div class="shock-heading"><label for="shockSize">Sector move</label><output id="shockValue" for="shockSize">−30%</output></div>
+        <input id="shockSize" type="range" min="-50" max="20" step="1" value="-30" />
+        <label for="shockRegime">Historical conditions</label>
+        <select id="shockRegime"><option value="calm">Calm · VIX below 20</option><option value="crisis">Crisis · VIX above 30</option></select>
+        <p id="sandboxSummary" class="summary" aria-live="polite"></p>
+        <ul id="sandboxResults" class="stress-results" aria-label="Modelled sector moves"></ul>
+        <p id="sandboxPeriod" class="fine"></p>
+        <p class="fine">Exit to return to your saved historical week.</p>
+      </article>
       <article id="tour" class="card" aria-live="polite">
         <button class="close" id="tourExit" aria-label="Exit tour">×</button>
         <div class="meta mono"><span id="tourNum">01</span><span class="date" id="tourDate"></span><span id="tourStep"></span></div>
@@ -145,9 +211,17 @@
         <div class="meta mono"><span class="date" id="date">—</span></div>
         <div class="phase mono" id="phase">—</div>
         <h2 id="headline">—</h2>
-        <div class="row"><span class="k">Fear (VIX)</span><span class="v" id="vix">—</span></div>
+        <div class="row"><span class="k" id="vixLabel">Fear (VIX)</span><span class="v" id="vix">—</span></div>
         <div class="row"><span class="k">Sea level</span><span class="v" id="corr">—</span></div>
         <div class="row"><span class="k">Market</span><span class="v" id="mret">—</span></div>
+        <div class="sea-scale" id="seaScale">
+          <div class="mono" id="seaDrop">Correlation drives the waterline</div>
+          <meter id="seaMeter" min="0" max="100" value="0" aria-label="Sea-level drop within the visual model"></meter>
+          <div class="sea-endpoints"><span>Normal waterline</span><span>Lowest</span></div>
+          <div class="sea-key"><span><i class="water"></i>Water depth</span><span><i class="shelf"></i>Exposed seabed</span></div>
+          <label class="coast-toggle"><input id="referenceCoast" type="checkbox" checked /> Show normal coastline</label>
+          <small>White outline = normal coast. Visual scale, not metres.</small>
+        </div>
         <div id="mood" class="mono"></div>
       </article>
 
@@ -162,7 +236,7 @@
       <div class="fine">For exploration and education — not financial advice.<br>
         Planet shader: <a href="https://github.com/jsulpis/realtime-planet-shader" target="_blank" rel="noopener noreferrer">Julien Sulpis</a>
         (<a href="licenses/realtime-planet-shader.txt">GPL-3.0</a>), adapted by Gareth Menezes ·
-        <a href="https://github.com/Jaysmito101/TerraForge3D" target="_blank" rel="noopener noreferrer">TerraForge3D</a> (<a href="licenses/TerraForge3D.txt">MIT</a>)</div>
+        <a href="https://github.com/Jaysmito101/TerraForge3D" target="_blank" rel="noopener noreferrer">TerraForge3D</a> (<a href="licenses/TerraForge3D.txt">MIT</a>) · <a href="https://github.com/archimedix/sea-level-explorer" target="_blank" rel="noopener noreferrer">Sea Level Explorer</a> (<a href="licenses/sea-level-explorer.txt">MIT</a>) · <a href="https://github.com/mrdoob/three.js" target="_blank" rel="noopener noreferrer">Three.js Water / Sky</a> (<a href="licenses/three.txt">MIT</a>)</div>
     </aside>
   </main>
 
@@ -181,10 +255,10 @@
   <dialog id="aboutDialog">
     <button class="close" id="closeAbout" aria-label="Close">×</button>
     <h2>Every feature is a real number.</h2>
-    <div class="guide-row"><b>Continents</b><span>Six sectors, five large US companies each. Name shown on the continent.</span></div>
+    <div class="guide-row"><b>Continents</b><span>Six sectors of selected companies in the active UK, US or Asian market. These baskets are not official market indexes. Name shown on the continent.</span></div>
     <div class="guide-row"><b>Mountains</b><span>One per company, ticker above the peak. Height = price growth since 2007 (log scale). Glow at the foot = this week's return <span class="swatch"></span> red down, green up.</span></div>
-    <div class="guide-row"><b>Sea level</b><span>Average correlation between sectors. Calm: normal sea, six separate continents. As sectors start moving together the sea falls and wide salt flats appear around every coast; at correlation 0.85+ the sea is at its lowest — diversification fails when it is needed most. The faint ring marks the normal shoreline.</span></div>
-    <div class="guide-row"><b>Weather</b><span>Market fear (VIX): storms, red atmosphere, dimmer sun; lightning above 40.</span></div>
+    <div class="guide-row"><b>Sea level</b><span>Average correlation between sectors. Calm: normal sea, six separate continents. As sectors start moving together the sea falls and wide salt flats appear around every coast; at correlation 0.85+ the sea is at its lowest in this visual model. Pale blue marks shallow water and tan shelves mark exposed seabed. The optional white outline marks the normal coastline. The scale illustrates correlation, not real sea height.</span></div>
+    <div class="guide-row"><b>Weather</b><span>US VIX drives storms and sunlight. It is a US-market measure used as a global-risk proxy for the UK and Asia, not a local volatility index.</span></div>
     <div class="guide-row"><b>Volcanoes</b><span>Weeks when stocks fell over 7% on average, on the two hardest-hit sectors. The planet shakes.</span></div>
     <div class="guide-row"><b>Keys</b><span>Space play · ←/→ week · Shift+←/→ year · 1–9 tour stops · Esc close</span></div>
     <div class="guide-row"><b>Limits</b><span>Price growth, not market cap. Today's big companies (survivorship bias). Not financial advice.</span></div>

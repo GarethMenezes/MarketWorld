@@ -7,6 +7,13 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import planetFragment from './shaders/planet.frag.glsl?raw';
+import { SEA_CONFIG, seaLevelFromCorrelation, seaDropFraction } from './sea-level.js';
+import { buildOceanPalette } from './ocean-palette.js';
+import { loadMarkets, nearestWeek } from './market-catalog.js';
+import { simulateShock, compareShockRegimes } from './stress-model.js';
+const marketContext = await loadMarkets();
+const activeMarket = marketContext.active;
+const stressData = marketContext.stress;
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
@@ -27,7 +34,7 @@ const CONFIG = {
   //   fall = (corr - corrLow) / (corrHigh - corrLow), clamped; level = normal + fall * (lowest - normal)
   //   ≤ 0.3 → normal sea · ≥ 0.85 → lowest: wide salt-flat shelves around every coast
   //   2017 ≈ 0.13 · Oct 2008 ≈ 0.77 · Mar 2020 ≈ 0.86   (levels in shader altitude units)
-  sea: { corrLow: 0.3, corrHigh: 0.85, normal: 0, lowest: -0.065, seconds: 1.2 },
+  sea: SEA_CONFIG,
 
   // Weather from VIX: storm = (vix - vixCalm) / vixRange, clamped to [0, 1]
   //   VIX 13 → clear blue sky · VIX 58+ → red sky, thick dark clouds
@@ -39,10 +46,10 @@ const CONFIG = {
   weekMs: 120,                                  // playback speed: ms per trading week
   smoothing: 4,                                 // higher = visuals follow data faster
   autoRotateSpeed: 0.35,
-  tour: { flySeconds: 2, marketDistance: 15, focusDistance: 11 },
+  tour: { flySeconds: 2, marketDistance: 23, focusDistance: 11 },
 
   // Render resolution: full screen resolution (up to 2×) for sharp edges and text.
-  maxPixelRatio: 2,
+  maxPixelRatio: 1.5,
   planetLight: 1.5,         // sun strength in the planet shader (Gareth's was 3 with his own tone mapping)
 };
 
@@ -76,7 +83,7 @@ const SKY_STORM = new THREE.Color('#120203');
 scene.background = SKY_CALM.clone();
 
 const camera = new THREE.PerspectiveCamera(45, viewSize()[0] / viewSize()[1], 0.1, 500);
-camera.position.set(0, 3.2, 15); // planet fills the view
+camera.position.set(0, 4.5, 23); // planet fills the view
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
@@ -170,6 +177,11 @@ function makeNoiseTexture() {
   tex.needsUpdate = true;
   return tex;
 }
+const oceanPalette = new THREE.DataTexture(buildOceanPalette(), 512, 1, THREE.RGBAFormat);
+oceanPalette.colorSpace = THREE.SRGBColorSpace;
+oceanPalette.minFilter = oceanPalette.magFilter = THREE.LinearFilter;
+oceanPalette.generateMipmaps = false;
+oceanPalette.needsUpdate = true;
 const ATMO_CALM = new THREE.Color('#4aa8ff');
 const ATMO_STORM = new THREE.Color('#ff4a2a');
 const planetUniforms = {
@@ -199,6 +211,9 @@ const planetUniforms = {
   uContinentColor: { value: Array.from({ length: 6 }, () => new THREE.Color()) },
   uContinentCap: { value: 0.45 },
   uSeaLevel: { value: 0 },
+  uOceanPalette: { value: oceanPalette },
+  uShowReferenceCoast: { value: 1 },
+  uSectorShock: { value: new Float32Array(6) },
   uVentDir: { value: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)] },
 };
 const planet = new THREE.Mesh(new THREE.SphereGeometry(R * 1.85, 48, 32), new THREE.ShaderMaterial({
@@ -356,7 +371,7 @@ function makeLabel(text, cls, title) {
 }
 
 // ───────────────────────────── DATA → WORLD ─────────────────────────────
-const data = await fetch('/world.json').then((r) => r.json());
+const data = marketContext.world;
 let tours = []; // filled in the GUIDED TOURS section; declared early so key handlers never hit it uninitialised
 const N = data.dates.length;
 const stockIndex = Object.fromEntries(data.stocks.map((s) => [s.ticker, s]));
@@ -396,7 +411,7 @@ const continents = data.sectors.map((sector, i) => {
     ring.position.copy(d).multiplyScalar(R + 0.012);
     ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
     group.add(ring);
-    const label = makeLabel(ticker, 'tk', COMPANY[ticker]);
+    const label = makeLabel(ticker, 'tk', stockIndex[ticker]?.name || COMPANY[ticker]);
     label.position.set(0, 1.08, 0); // just above the peak; follows the mountain's height
     mesh.add(label);
     mesh.position.copy(d).multiplyScalar(R - 0.02); // shader surface is a sphere of radius R
@@ -427,8 +442,7 @@ function colorFromReturn(ret, out) {
   return t < 0 ? out.copy(YELLOW).lerp(RED, -t) : out.copy(YELLOW).lerp(GREEN, t);
 }
 const stormFromVix = (vix) => clamp01((vix - CONFIG.storm.vixCalm) / CONFIG.storm.vixRange);
-const seaFromCorr = (c) => CONFIG.sea.normal +
-  clamp01((c - CONFIG.sea.corrLow) / (CONFIG.sea.corrHigh - CONFIG.sea.corrLow)) * (CONFIG.sea.lowest - CONFIG.sea.normal);
+
 const SECTOR_NAMES = data.sectors.map((x) => x.name);
 function pairCorrAt(a, b, i) {
   const pc = data.market.pairCorr || {};
@@ -443,7 +457,7 @@ const state = {
   sea: 0, targetSea: 0,
   quake: 0, flash: 0, vix: 15,
   eruption: 0, targetEruption: 0, vents: [0, 1],
-  selected: null,
+  selected: null, sandbox: null,
   touring: false, tourStop: 0, rotationPaused: false,
 };
 
@@ -453,7 +467,7 @@ function setWeek(i, { quake = true } = {}) {
   state.week = i;
   const m = data.market;
   if (m.vix[i] != null) { state.vix = m.vix[i]; state.targetStorm = stormFromVix(m.vix[i]); }
-  if (m.avgCorr[i] != null) state.targetSea = seaFromCorr(m.avgCorr[i]);
+  state.targetSea = seaLevelFromCorrelation(m.avgCorr[i], CONFIG.sea) ?? CONFIG.sea.normal;
   if (quake && i !== prev && m.ret[i] != null && m.ret[i] < CONFIG.quakeRet) {
     state.quake = Math.max(state.quake, Math.min(1, m.ret[i] / -0.15));
   }
@@ -480,10 +494,18 @@ function setWeek(i, { quake = true } = {}) {
   if (i !== prev) requestExplanation();
   slider.value = String(i);
   sliderDate.textContent = fmtDate(data.dates[i]).toUpperCase();
+  $('jumpDate').value=data.dates[i];
+  updateNeighborWorlds(i);
 }
 
 // ───────────────────────────── UI ─────────────────────────────
 const $ = (id) => document.getElementById(id);
+$('marketName').textContent=activeMarket.name;
+$('marketNote').textContent=(data.marketInfo?.description || 'Selected-company basket · local-currency prices');
+$('vixLabel').textContent=activeMarket.id==='us'?'Fear (VIX)':'US VIX · global-risk proxy';
+$('referenceCoast').addEventListener('change',e=>{
+ planetUniforms.uShowReferenceCoast.value=e.target.checked?1:0;
+});
 const slider = $('slider'), sliderDate = $('sliderDate'), playBtn = $('play');
 slider.max = String(N - 1);
 $('weekTotal').textContent = String(N);
@@ -521,7 +543,7 @@ function corrLabel(c) {
   if (c <= CONFIG.sea.corrLow) return 'normal';
   if (c < 0.6) return 'falling';
   if (c < CONFIG.sea.corrHigh) return 'low · shores drying';
-  return 'lowest · one landmass';
+  return 'lowest · exposed shelves';
 }
 
 // Card headline and phase come straight from the numbers (no invented narrative)
@@ -551,11 +573,16 @@ function updateStatsPanel() {
   markTick(i);
   $('vix').textContent = m.vix[i] == null ? '—' : `${m.vix[i].toFixed(1)} · ${vixLabel(m.vix[i])}`;
   $('corr').textContent = m.avgCorr[i] == null ? '—' : `${corrLabel(m.avgCorr[i])} · corr ${m.avgCorr[i].toFixed(2)}`;
+  const seaLevel=seaLevelFromCorrelation(m.avgCorr[i],CONFIG.sea);
+  const drop=seaDropFraction(seaLevel,CONFIG.sea);
+  $('seaDrop').textContent=drop==null?'No correlation data · normal sea shown':`Drop: ${Math.round(drop*100)}% of visual range`;
+  $('seaMeter').value=drop==null?0:Math.round(drop*100);
+  $('seaMeter').setAttribute('aria-valuetext',drop==null?'No correlation data':`${Math.round(drop*100)}% sea-level drop in the visual model`);
   $('mret').innerHTML = `<span class="${cls(m.ret[i])}">${pct(m.ret[i])}</span>`;
   const notes = [];
   if (m.ret[i] != null && m.ret[i] < CONFIG.quakeRet) notes.push('Earthquake: crash week');
   if (m.vix[i] != null && m.vix[i] > CONFIG.lightningVix) notes.push('Lightning: extreme fear');
-  if (m.avgCorr[i] != null && m.avgCorr[i] > 0.75) notes.push('Low tide: sectors fall together, diversification failing');
+  if (m.avgCorr[i] != null && m.avgCorr[i] > 0.75) notes.push('Low tide: sectors move more closely together');
   $('mood').textContent = notes.join(' · ');
 }
 
@@ -568,7 +595,7 @@ function updateInfoPanel() {
   $('info').style.display = 'block';
   if (sel.ticker) {
     const s = stockIndex[sel.ticker];
-    $('infoTitle').textContent = `${COMPANY[sel.ticker] ?? sel.ticker}`;
+    $('infoTitle').textContent = `${s.name ?? COMPANY[sel.ticker] ?? sel.ticker}`;
     $('infoSub').textContent = `${sel.ticker} · ${s.sector} · ${fmtDate(data.dates[i])}`;
     $('infoRows').innerHTML =
       row('Growth since 2007', s.growth[i] == null ? '—' : `×${s.growth[i].toFixed(2)}`) +
@@ -599,7 +626,7 @@ function requestExplanation() {
   const ai = $('ai');
   clearTimeout(explainTimer);
   const sel = state.selected;
-  if (!sel) return;
+  if (!sel || state.sandbox) return;
   if (state.playing) { ai.innerHTML = ''; return; } // don't spam the backend during playback
   const seq = ++explainSeq, week = state.week;
   ai.innerHTML = `<span class="label">Explorer's log</span><div>Thinking…</div>`;
@@ -608,7 +635,7 @@ function requestExplanation() {
     try {
       const r = await fetch('/api/explain', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker: sel.ticker, sector: sel.ticker ? null : sel.sector, week }),
+        body: JSON.stringify({ ticker: sel.ticker, sector: sel.ticker ? null : sel.sector, week, market: activeMarket.id }),
       });
       if (r.ok) res = await r.json();
     } catch { /* backend offline: fall through */ }
@@ -627,14 +654,14 @@ function setPlaying(p) {
   playBtn.textContent = p ? '❚❚ Pause' : '▶ Play';
   playBtn.setAttribute('aria-label', p ? 'Pause' : 'Play');
   controls.autoRotate = !p && !state.touring && !state.rotationPaused; // still while playing/touring
-  if (!p) requestExplanation();
+  if (!p && !state.sandbox) requestExplanation();
 }
 playBtn.addEventListener('click', () => setPlaying(!state.playing));
 slider.addEventListener('input', () => setWeek(Number(slider.value)));
 
 // Keyboard: Space play/pause · ←/→ one week · Shift+←/→ one year (52 weeks)
 window.addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement && e.target.type === 'text') return;
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || state.sandbox) return;
   if (e.code === 'Space') {
     e.preventDefault();
     setPlaying(!state.playing);
@@ -650,10 +677,139 @@ window.addEventListener('keydown', (e) => {
 });
 playBtn.addEventListener('keydown', (e) => { if (e.code === 'Space') e.preventDefault(); }); // no double toggle
 
+
+
+// Two neighboring worlds remain actual selectable planets in the Three.js scene.
+const neighbors=[];
+function copyUniforms(source){
+ const copy={};
+ for(const [key,{value}] of Object.entries(source)){
+  copy[key]={value:Array.isArray(value)?value.map(v=>v?.clone?v.clone():v):
+   ArrayBuffer.isView(value)?value.slice():value?.clone&&!value.isTexture?value.clone():value};
+ }
+ return copy;
+}
+for(const [index,market] of marketContext.manifest.markets.filter(m=>m.id!==activeMarket.id).entries()){
+ const uniforms=copyUniforms(planetUniforms);
+ const mesh=new THREE.Mesh(planet.geometry,planet.material.clone());mesh.material.uniforms=uniforms;
+ mesh.position.set(index===0?-8.3:8.3,index===0?1.3:-.1,-3.8);mesh.scale.setScalar(.24);
+ uniforms.uProjection.value=camera.projectionMatrix;
+ uniforms.uWorldRadius.value=R*.24;uniforms.uPlanetPosition.value.copy(mesh.position);
+ uniforms.uQuality.value=1;uniforms.uEruption.value=0;uniforms.uShowReferenceCoast.value=0;
+ mesh.frustumCulled=false;mesh.renderOrder=-2;mesh.userData.marketId=market.id;scene.add(mesh);
+ const label=makeLabel(market.short+' · EXPLORE','market-label');label.position.copy(mesh.position);label.position.y-=1.65;scene.add(label);
+ neighbors.push({market,mesh,uniforms,label});pickables.push(mesh);
+}
+function layoutNeighbors(){
+ const narrow=camera.aspect<1;
+ neighbors.forEach((item,i)=>{
+  item.mesh.position.set((i===0?-1:1)*(narrow?3.5:8.3),narrow?6.6:(i===0?1.3:-.1),-3.8);
+  item.uniforms.uPlanetPosition.value.copy(item.mesh.position);
+  item.label.position.copy(item.mesh.position);item.label.position.y-=1.65;
+ });
+}
+layoutNeighbors();
+for(const market of marketContext.manifest.markets){
+ const button=document.createElement('button');button.textContent=market.short;
+ button.setAttribute('aria-label','Explore '+market.name+' markets');
+ button.setAttribute('aria-pressed',String(market.id===activeMarket.id));
+ button.addEventListener('click',()=>navigateMarket(market.id));$('marketNav').appendChild(button);
+}
+function navigateMarket(id){
+ if(id===activeMarket.id){startFly(new THREE.Vector3(0,4.5,23),23);return;}
+ const url=new URL(location.href);url.searchParams.set('market',id);
+ url.searchParams.set('week',data.dates[state.sandbox?.week??state.week]);
+ location.assign(url);
+}
+function updateNeighborWorlds(week){
+ for(const item of neighbors){
+  const source=marketContext.worlds[item.market.id],index=nearestWeek(source.dates,data.dates[week]);
+  item.uniforms.uSeaLevel.value=seaLevelFromCorrelation(source.market.avgCorr[index],CONFIG.sea)??0;
+  const storm=stormFromVix(source.market.vix[index]??13);
+  item.uniforms.uStorm.value=storm;item.uniforms.uStress.value=storm;
+  item.uniforms.uCloudsDensity.value=CONFIG.clouds.calm+(CONFIG.clouds.storm-CONFIG.clouds.calm)*storm;
+  item.uniforms.uAtmosphereColor.value.copy(ATMO_CALM).lerp(ATMO_STORM,storm);
+  item.uniforms.uSunIntensity.value=CONFIG.planetLight*(1-.55*storm);
+  item.uniforms.uAmbientLight.value=.06;
+ }
+}
+
+// ── Historical stress sandbox (offline; coefficients generated from daily data).
+const sectorShockTargets=new Float32Array(6);
+for(const sector of data.sectors){
+ const option=document.createElement('option');option.value=sector.name;option.textContent=sector.name;
+ $('shockSector').appendChild(option);
+}
+$('shockSector').value='Energy';
+$('sandboxBtn').disabled=!stressData;
+if(!stressData)$('sandboxBtn').title='Historical stress coefficients are not available';
+function setHistoryControls(disabled){
+ for(const id of ['slider','play','tourBtn','prevStop','nextStop','jumpDate'])$(id).disabled=disabled;
+}
+function applySandbox(){
+ if(!state.sandbox)return;
+ const sector=$('shockSector').value,shock=Number($('shockSize').value)/100,regime=$('shockRegime').value;
+ const results=simulateShock(stressData,sector,shock,regime);
+ state.sandbox.sector=sector;state.sandbox.shock=shock;state.sandbox.regime=regime;
+ $('shockValue').textContent=pct(shock,0);
+ $('sandboxSummary').textContent=compareShockRegimes(stressData,sector,shock);
+ $('sandboxResults').replaceChildren(...results.map(result=>{
+  const item=document.createElement('li');
+  const name=document.createElement('span');name.textContent=result.sector;
+  const value=document.createElement('strong');value.textContent=result.move==null?'Unavailable':pct(result.move);
+  value.className=result.move==null?'':result.move<0?'down':'up';
+  const bar=document.createElement('i');
+  const amount=result.move==null?0:result.move;
+  bar.style.width=Math.min(100,Math.abs(amount)*160)+'%';
+  bar.className=amount<0?'loss':'gain';item.append(name,value,bar);return item;
+ }));
+ const rows=new Map(results.map(r=>[r.sector,r]));
+ data.sectors.forEach((sec,i)=>{sectorShockTargets[i]=rows.get(sec.name)?.move??0;});
+ for(const mountain of allMountains){
+  const u=mountain.userData,move=rows.get(u.sector)?.move;
+  const growth=u.stock?.growth[state.sandbox.week];
+  if(growth==null)continue;
+  u.targetHeight=heightFromGrowth(Math.max(.00001,growth*(1+(move??0))));
+  if(move==null){u.targetColor.copy(GREY);u.targetGlow=0;}
+  else {colorFromReturn(move,u.targetColor);u.targetGlow=CONFIG.glow.base+Math.min(1,Math.abs(move)*4);}
+ }
+ const model=stressData.regimes[regime];
+ const correlations=Object.entries(model.corr).flatMap(([a,row])=>Object.entries(row).filter(([b,v])=>a!==b&&Number.isFinite(v)).map(([,v])=>v));
+ const correlation=correlations.length?correlations.reduce((a,b)=>a+b,0)/correlations.length:null;
+ state.targetSea=seaLevelFromCorrelation(correlation,CONFIG.sea)??CONFIG.sea.normal;
+ state.targetStorm=regime==='crisis'?.82:.1;
+ const worst=results.filter(r=>Number.isFinite(r.move)).slice(0,2);
+ state.vents=worst.map(r=>data.sectors.findIndex(s=>s.name===r.sector));
+ while(state.vents.length<2)state.vents.push(0);
+ const worstMove=worst[0]?.move??0;
+ state.targetEruption=worstMove<CONFIG.quakeRet?clamp01(-worstMove*2):0;
+ state.quake=worstMove<CONFIG.quakeRet?clamp01(-worstMove):0;
+ $('planetTag').textContent='WHAT IF · '+activeMarket.short;
+ $('weather').textContent=regime+' historical model';
+}
+function enterSandbox(){
+ if(!stressData||state.sandbox)return;
+ exitTour();setPlaying(false);select(null);
+ state.sandbox={week:state.week};controls.autoRotate=false;
+ $('week').hidden=true;$('sandbox').hidden=false;
+ setHistoryControls(true);applySandbox();
+ $('story').scrollTo({top:0,behavior:'smooth'});
+}
+function exitSandbox(){
+ if(!state.sandbox)return;
+ const remembered=state.sandbox.week;state.sandbox=null;sectorShockTargets.fill(0);
+ $('sandbox').hidden=true;$('week').hidden=false;setHistoryControls(false);
+ setWeek(remembered,{quake:false});controls.autoRotate=!state.rotationPaused;
+}
+$('sandboxBtn').addEventListener('click',enterSandbox);
+$('sandboxExit').addEventListener('click',exitSandbox);
+for(const id of ['shockSector','shockSize','shockRegime'])$(id).addEventListener('input',applySandbox);
+$('sandboxPeriod').textContent=`Simple linear model from historical data (${data.dates[0].slice(0,4)}–${data.dates.at(-1).slice(0,4)}). Not a prediction or financial advice.`;
+
 // ───────────────────────────── GUIDED TOURS ─────────────────────────────
 // public/tours.json: [{ date, title, focus: "market" | sector | ticker, narration, narrationSource }]
 // Narrations are pre-generated (python -m server.make_tours) so the tour works offline.
-tours = await fetch('/tours.json').then((r) => (r.ok ? r.json() : [])).catch(() => []);
+tours = await fetch(activeMarket.tours).then((r) => (r.ok ? r.json() : [])).catch(() => []);
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const tourQ = new THREE.Quaternion(), tmpV = new THREE.Vector3();
 const fly = { active: false, t: 0, fromDir: new THREE.Vector3(), toDir: new THREE.Vector3(), fromDist: 0, toDist: 0 };
@@ -737,7 +893,7 @@ jumpDate.max = data.dates[N - 1];
 $('dateForm').addEventListener('submit', (e) => {
   e.preventDefault();
   if (!jumpDate.value) return;
-  const w = data.dates.findIndex((d) => d >= jumpDate.value);
+  const w = nearestWeek(data.dates, jumpDate.value);
   setPlaying(false);
   setWeek(w === -1 ? N - 1 : w);
 });
@@ -761,6 +917,8 @@ $('rotate').addEventListener('click', () => {
 // Click picking (ignore drags)
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
+const pickSurface = new THREE.Sphere(new THREE.Vector3(), R*.995);
+const pickSurfaceHit = new THREE.Vector3();
 let downAt = null;
 canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
 canvas.addEventListener('pointerup', (e) => {
@@ -768,9 +926,14 @@ canvas.addEventListener('pointerup', (e) => {
   const rect = canvas.getBoundingClientRect();
   pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects(pickables, false).find((h) => h.object.visible);
+  pickSurface.center.copy(world.position);
+  const groundHit=raycaster.ray.intersectSphere(pickSurface,pickSurfaceHit);
+  const groundDistance=groundHit?raycaster.ray.origin.distanceTo(groundHit):Infinity;
+  const hit = raycaster.intersectObjects(pickables, false).find(h=>h.object.visible&&h.distance<=groundDistance+.15);
   if (!hit) return;
   const u = hit.object.userData;
+  if(u.marketId){navigateMarket(u.marketId);return;}
+  if(state.sandbox)return;
   select(u.ticker ? { ticker: u.ticker, sector: u.sector } : { ticker: null, sector: u.sector });
 });
 
@@ -778,6 +941,7 @@ new ResizeObserver(() => {
   const [w, h] = viewSize();
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
+  layoutNeighbors();
   renderer.setSize(w, h, false);
   composer.setSize(w, h);
   labelRenderer.setSize(w, h);
@@ -850,12 +1014,13 @@ function animate() {
   pu.uAtmosphereColor.value.copy(ATMO_CALM).lerp(ATMO_STORM, s); // blue → red with fear
   pu.uAccent.value.copy(pu.uAtmosphereColor.value);
   pu.uSunIntensity.value = CONFIG.planetLight * (1 - 0.55 * s);    // storms dim the sun
-  pu.uAmbientLight.value = 0.018 + 0.015 * s;   // dark night side
+  pu.uAmbientLight.value = 0.04 + 0.015 * s;   // dark night side
   sun.intensity = 2.4 - 1.1 * s;
 
   // Continents for the shader: centre direction + world→local rotation (fixed)
   pu.uPlanetPosition.value.copy(world.position);
   for (let c = 0; c < continents.length; c++) {
+    pu.uSectorShock.value[c] += (sectorShockTargets[c]-pu.uSectorShock.value[c])*k;
     const q = continents[c].group.quaternion;
     pu.uContinentDir.value[c].copy(Z).applyQuaternion(q);
     tmpM4.makeRotationFromQuaternion(tmpQ.copy(q).invert());
@@ -868,7 +1033,7 @@ function animate() {
   for (let v = 0; v < 2; v++) pu.uVentDir.value[v].copy(pu.uContinentDir.value[state.vents[v]]);
 
   // Lightning: random flashes while VIX is above the threshold
-  if (state.vix > CONFIG.lightningVix && Math.random() < dt * (0.4 + (state.vix - CONFIG.lightningVix) * 0.04)) {
+  if (!state.sandbox && state.vix > CONFIG.lightningVix && Math.random() < dt * (0.4 + (state.vix - CONFIG.lightningVix) * 0.04)) {
     state.flash = 1;
   }
   state.flash *= Math.exp(-dt * 14);
@@ -883,6 +1048,13 @@ function animate() {
     state.quake *= Math.exp(-dt * 1.6);
   } else if (state.quake > 0) { state.quake = 0; world.position.set(0, 0, 0); }
 
+  for(const item of neighbors){
+    item.uniforms.uTime.value=t;
+    for(let c=0;c<continents.length;c++){
+      item.uniforms.uContinentDir.value[c].copy(pu.uContinentDir.value[c]);
+      item.uniforms.uContinentRot.value[c].copy(pu.uContinentRot.value[c]);
+    }
+  }
   updateFly(dt);
   controls.update(dt);
   updateLabels();
@@ -898,7 +1070,7 @@ if (import.meta.env.DEV) window.mw = { scene, camera, controls, continents, plan
 function weekFromUrl() {
   const w = new URLSearchParams(location.search).get('week');
   if (!w) return null;
-  const i = data.dates.findIndex((d) => d >= w);
+  const i = nearestWeek(data.dates, w);
   return i === -1 ? N - 1 : i;
 }
 const start = weekFromUrl() ?? data.dates.findIndex((d) => d >= '2007-06-29');
