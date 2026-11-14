@@ -25,6 +25,7 @@ out vec4 fragColor;
 //===================//
 
 uniform float uTime;
+uniform float uEruption, uStorm;
 uniform float uRotationOffset;
 uniform float uTilt, uStress, uSeed, uRingRadius, uRingWidth;
 uniform vec3 uWaterDeep, uWaterSurface, uTreeColor, uRockColor, uAccent;
@@ -297,7 +298,10 @@ vec3 spaceColor(vec3 direction) {
   vec3 backgroundCoord = direction * backgroundRotation;
   float spaceNoise = fbm(backgroundCoord * 3., 4, .5, 2., 6.);
 
-  return stars(backgroundCoord)*.45 + mix(DEEP_SPACE, uAtmosphereColor / 24., spaceNoise);
+  vec3 clearSky=stars(backgroundCoord)*.45 + mix(DEEP_SPACE,uAtmosphereColor/24.,spaceNoise);
+  float fog=fbm(direction*4.+vec3(uTime*.013,0.,0.),4,.5,2.,1.);
+  vec3 gloomy=mix(vec3(.002,.004,.007),vec3(.025,.032,.043),fog);
+  return mix(clearSky,gloomy,uStorm*.94);
 }
 
 vec3 atmosphereColor(vec3 ro, vec3 rd, float spaceMask, Hit firstHit) {
@@ -331,6 +335,107 @@ vec3 atmosphereColor(vec3 ro, vec3 rd, float spaceMask, Hit firstHit) {
   return atmosphere * uAtmosphereColor * atmosphereMask * (1. - moonMask * isMoonInFront);
 }
 
+
+// Volcanic cones, lava channels and ash volumes — Market Worlds additions.
+vec3 ventAxis(int i) {
+  return normalize(i==0?vec3(-.42,.52,.74):vec3(.43,-.12,.89));
+}
+vec3 toWorld(vec3 p) { return transpose(PLANET_ROTATION)*p+uPlanetPosition; }
+vec3 toLocal(vec3 p) { return PLANET_ROTATION*(p-uPlanetPosition); }
+// Volcano height profile adapted from TerraForge3D's volcano/shape.glsl.
+// Copyright (c) 2022 Jaysmito Mukherjee. MIT; see licenses/TerraForge3D.txt.
+// Browser adaptation: tangent-plane coordinates, local texture noise and
+// conservative height-field marching in place of the desktop compute pipeline.
+float coneSDF(vec3 p,int i) {
+  vec3 n=ventAxis(i),q=p-n*(uPlanetRadius-.045);
+  float h=dot(q,n),radius=length(q-n*h);
+  float distortion=(noise(q*24.)-.5)*.018;
+  float r=max(0.,radius+distortion);
+  float craterRadius=.067, mountainOuter=.29;
+  float mountainMask=1.-smoothstep(craterRadius*.5,mountainOuter,r);
+  float craterMask=1.-smoothstep(0.,craterRadius,r);
+  float height=.34*mountainMask-.34*.9*.3*craterMask;
+  float outsideMask=smoothstep(craterRadius,mountainOuter,r);
+  height+=(noise(q*60.)-.5)*.018*outsideMask*mountainMask;
+  return max(max(h-height,-h),radius-mountainOuter)*.38;
+}
+vec3 lavaEmission(vec3 world) {
+  if(uEruption<.01)return vec3(0.);
+  vec3 p=toLocal(world);float glow=0.;
+  for(int i=0;i<2;i++){
+    vec3 n=ventAxis(i),q=p-n*uPlanetRadius;
+    vec3 t=normalize(cross(n,vec3(0.,1.,0.))),b=cross(n,t);
+    float r=length(q-n*dot(q,n));
+    float angle=atan(dot(q,b),dot(q,t));
+    float flow=sin(angle*7.+r*16.+noise(p*9.)*7.-uTime*.9);
+    float channel=1.-smoothstep(.035,.14,abs(flow));
+    float pool=1.-smoothstep(.035,.12,r);
+    glow+=max(channel*.7,pool)*exp(-r*3.8)*step(r,.95);
+  }
+  return mix(vec3(5.,.17,.008),vec3(8.,1.9,.09),clamp(glow,0.,1.))*glow*uEruption;
+}
+Hit intersectVolcano(vec3 ro,vec3 rd) {
+  if(uEruption<.01)return miss;
+  Hit result=miss;
+  for(int i=0;i<2;i++){
+    vec3 center=toWorld(ventAxis(i)*(uPlanetRadius+.12));
+    float start=sphIntersect(ro,rd,Sphere(center,.48));
+    if(start<0.)continue;
+    float t=start;
+    for(int j=0;j<28;j++){
+      vec3 p=toLocal(ro+rd*t);float d=coneSDF(p,i);
+      if(d<.002){
+        vec2 e=vec2(.003,0.);
+        vec3 n=normalize(vec3(coneSDF(p+e.xyy,i)-coneSDF(p-e.xyy,i),
+          coneSDF(p+e.yxy,i)-coneSDF(p-e.yxy,i),coneSDF(p+e.yyx,i)-coneSDF(p-e.yyx,i)));
+        if(t<result.len)result=Hit(t,transpose(PLANET_ROTATION)*n,Material(vec3(.055,.032,.022),1.,.05));
+        break;
+      }
+      t+=max(d,.004);if(t>start+.98)break;
+    }
+  }
+  return result;
+}
+vec3 volcanicAtmosphere(vec3 ro,vec3 rd,vec3 background,float sceneDepth) {
+  if(uEruption<.01)return background;
+  vec3 result=background;
+  for(int i=0;i<2;i++){
+    vec3 axis=ventAxis(i),vent=axis*(uPlanetRadius+.30);
+    vec3 bound=toWorld(vent+axis*.48);
+    float start=sphIntersect(ro,rd,Sphere(bound,.77));
+    if(start<0.)continue;
+    vec3 smoke=vec3(0.);float alpha=0.;
+    for(int j=0;j<22;j++){
+      float t=start+float(j)*.065;if(t>=sceneDepth)break;
+      vec3 p=toLocal(ro+rd*t)-vent;
+      float h=dot(p,axis);
+      vec3 drift=vec3(.15,0.,-.05)*h*h;
+      float radius=length(p-axis*h-drift);
+      float width=.055+max(h,0.)*.26;
+      float shape=(1.-smoothstep(width*.35,width,radius))*smoothstep(-.08,.06,h)*(1.-smoothstep(.85,1.15,h));
+      float turbulence=fbm(p*6.-axis*uTime*.65,3,.5,2.,1.);
+      float density=shape*smoothstep(.22,.65,turbulence)*uEruption;
+      float a=1.-exp(-density*.5);
+      float heat=exp(-max(h,0.)*8.)*(1.-smoothstep(.01,.1,radius));
+      vec3 smokeColor=mix(vec3(.055,.059,.063),vec3(.19,.17,.15),turbulence);
+      smokeColor+=vec3(7.,1.15,.025)*heat;
+      smoke+=(1.-alpha)*a*smokeColor;alpha+=(1.-alpha)*a;
+    }
+    result=result*(1.-alpha)+smoke;
+    // Ejected glowing fragments on ballistic paths around the vent.
+    for(int k=0;k<12;k++){
+      float id=float(k),life=fract(uTime*.42+id*.0833);
+      float angle=id*2.39996;
+      vec3 tangent=normalize(cross(axis,vec3(0.,1.,0.))),bitangent=cross(axis,tangent);
+      vec3 particle=vent+axis*(life*1.45-life*life*1.65)+
+        (tangent*cos(angle)+bitangent*sin(angle))*life*.36;
+      float hit=sphIntersect(ro,rd,Sphere(toWorld(particle),.009*(1.-life)+.004));
+      if(hit>0.&&hit<sceneDepth)result+=vec3(5.,.8,.015)*(1.-life)*uEruption;
+    }
+  }
+  return result;
+}
+
 //===============//
 //  Ray Tracing  //
 //===============//
@@ -359,7 +464,13 @@ Hit intersectPlanet(vec3 ro, vec3 rd) {
   float cloudsThreshold = 1. - uCloudsDensity * .5;
   cloudsDensity *= smoothstep(cloudsThreshold, cloudsThreshold + .1, cloudsDensity);
   cloudsDensity *= (1. - smoothstep((ROCK_LEVEL + TREE_LEVEL) / 2., ROCK_LEVEL, altitude));
-  color = mix(color, CLOUD_COLOR, cloudsDensity);
+  vec3 cloudColor=mix(CLOUD_COLOR,vec3(.10,.13,.17),uStorm*.88);
+  color = mix(color,cloudColor,cloudsDensity);
+  float front=fbm(rotatedCoord*2.+vec3(uTime*.014,0.,0.),4,.55,2.,1.);
+  float stormCover=smoothstep(.35,.66,front)*uStorm;
+  color=mix(color,cloudColor,stormCover*.83);
+  float lightning=exp(-pow((fract(uTime/9.)-.7)*80.,2.));
+  color+=vec3(.2,.3,.5)*lightning*stormCover*.22;
   float coastGlow = 1. - smoothstep(.002,.012,abs(altitude-SAND_LEVEL));
   color += uAccent * coastGlow * uStress * .18;
 
@@ -399,6 +510,8 @@ Hit intersectRing(vec3 ro, vec3 rd) {
 Hit intersectScene(vec3 ro, vec3 rd) {
   Hit planetHit = intersectPlanet(ro, rd);
   Hit moonHit = intersectMoon(ro, rd);
+  Hit eruptionHit=intersectVolcano(ro,rd);
+  if(eruptionHit.len<planetHit.len)planetHit=eruptionHit;
   Hit ringHit = intersectRing(ro, rd);
   if(ringHit.len < planetHit.len) planetHit=ringHit;
 
@@ -437,11 +550,13 @@ vec3 radiance(vec3 ro, vec3 rd) {
     vec3 specularColor = hit.material.specular * vec3(phongValue);
 
     color = diffuseColor + specularColor;
+    if(length(hitPosition-uPlanetPosition)<uPlanetRadius+.4)color+=lavaEmission(hitPosition);
   } else {
     color = spaceColor(rd);
   }
   
-  return color + atmosphereColor(ro, rd, spaceMask, hit);
+  color+=atmosphereColor(ro,rd,spaceMask,hit)*(1.-uStorm*.55);
+  return volcanicAtmosphere(ro,rd,color,hit.len);
 }
 
 //========//

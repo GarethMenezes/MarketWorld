@@ -68,10 +68,10 @@ class RealtimePlanetView {
  resize(){const r=this.canvas.getBoundingClientRect(),dpr=Math.min(devicePixelRatio||1,innerWidth<=800?1.25:1.5);
    this.canvas.width=Math.max(1,Math.round(r.width*dpr));this.canvas.height=Math.max(1,Math.round(r.height*dpr));this.gl.viewport(0,0,this.canvas.width,this.canvas.height);}
  zoom(delta){this.zoomLevel=Math.max(.72,Math.min(1.4,this.zoomLevel+delta*.2));}
- setWorld(spec,index){if(this.activeIndex===index)return;this.spec=spec;this.activeIndex=index;
+ setWorld(spec,index){if(this.activeIndex===index&&this.spec?.visualMode===spec.visualMode)return;this.spec=spec;this.activeIndex=index;
    this.planet=new Planet3D.Planet(spec.name,2,0,.07,spec.land);this.planet.add_ring(spec.ringRadius,spec.ringWidth,spec.accent,.36);
    spec.moons.forEach(m=>{this.planet.add_moon(m.name,m.radius,m.orbit,m.speed,m.color).angle=m.angle;});
-   this.canvas.dataset.world=String(index);
+   this.canvas.dataset.world=String(index);this.canvas.dataset.effect=spec.visualMode;
  }
  render(seconds,moving=true){
    if(this.lost||!this.spec)return;
@@ -81,11 +81,11 @@ class RealtimePlanetView {
    this.float("uTime",this.time);this.float("uRotationOffset",this.yaw);this.float("uTilt",this.tilt);this.float("uZoom",this.zoomLevel);
    this.float("uQuality",innerWidth<=800?1:2);this.vec3("uPlanetPosition",[0,0,0]);this.float("uPlanetRadius",2);
    this.float("uNoiseStrength",s.stress>.8?.19:.17);this.float("uTerrainScale",.72+(s.seed%2)*.12);
-   this.float("uCloudsDensity",s.stress>.7?.18:currentClouds(this.activeIndex));this.float("uCloudsScale",1);this.float("uCloudsSpeed",1.4);
-   this.vec3("uAtmosphereColor",s.accent);this.float("uAtmosphereDensity",.30);this.float("uSunIntensity",3);this.float("uAmbientLight",.055);
+   this.float("uEruption",s.eruption);this.float("uStorm",s.storm);this.float("uCloudsDensity",Math.max(currentClouds(this.activeIndex),s.storm*.85));this.float("uCloudsScale",1);this.float("uCloudsSpeed",1.4);
+   this.vec3("uAtmosphereColor",s.accent);this.float("uAtmosphereDensity",.30);this.float("uSunIntensity",3-s.storm*1.65);this.float("uAmbientLight",.055+s.storm*.025);
    this.vec3("uWaterDeep",s.ocean.map(v=>v*.2));this.vec3("uWaterSurface",s.ocean.map(v=>v*.6));this.vec3("uTreeColor",s.land.map(v=>v*.35));
    this.vec3("uRockColor",s.land.map(v=>v*.65));this.vec3("uAccent",s.accent);this.float("uStress",s.stress);this.float("uSeed",s.seed);
-   this.float("uRingRadius",s.ringRadius*2);this.float("uRingWidth",s.ringWidth*2);
+   this.float("uRingRadius",s.ringRadius*2);this.float("uRingWidth",s.ringWidth*2*(1-s.eruption*.75));
    this.planet.moons.forEach((m,i)=>{const p=m.position(),a=.35+this.tilt*.3;const pos=[p[0]*2,p[2]*Math.sin(a)*2,p[2]*Math.cos(a)*2];
      this.vec3("uMoonPositions["+i+"]",pos);this.float("uMoonRadii["+i+"]",m.radius*2);this.vec3("uMoonColors["+i+"]",m.color);});
    gl.drawArrays(gl.TRIANGLES,0,3);

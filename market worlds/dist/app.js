@@ -48,22 +48,38 @@ const reduced=matchMedia("(prefers-reduced-motion: reduce)").matches;
 const dateLabel=d=>new Intl.DateTimeFormat("en-GB",{day:"2-digit",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(d+"T12:00:00Z")).toUpperCase();
 $("chapters").innerHTML=moments.map((m,i)=>`<article id="world-${i}" data-index="${i}" aria-labelledby="title-${i}"><div class="chapter-meta"><span class="number">${String(i+1).padStart(2,"0")}</span><time datetime="${m.date}">${dateLabel(m.date)}</time></div><span class="phase ${m.risk?"risk":""}">${m.phase}</span><h2 id="title-${i}">${m.title}</h2><p class="summary">${m.summary}</p><div class="outcome"><span class="symbol" aria-hidden="true">↗</span><div><h3>THE GOOD / OPPORTUNITY</h3><p>${m.good}</p></div></div><div class="outcome bad"><span class="symbol" aria-hidden="true">↘</span><div><h3>THE BAD / PRESSURE</h3><p>${m.bad}</p></div></div><div class="source"><span>HISTORICAL EVENT · ${String(i+1).padStart(2,"0")}</span><a href="${m.url}" target="_blank" rel="noopener noreferrer">${m.source} ↗</a></div><p class="interpretation">${m.insight}</p><button class="chapter-next" data-go="${i===moments.length-1?0:i+1}"><span>${i===moments.length-1?"Explore the journey again":"Next world · "+dateLabel(moments[i+1].date)}</span><span aria-hidden="true">${i===moments.length-1?"↑":"↓"}</span></button></article>`).join("");
 $("ticks").innerHTML=moments.map((m,i)=>`<button data-go="${i}" aria-label="Go to ${dateLabel(m.date)}">${m.short}</button>`).join("");
-let current=0,playTimer=null,autoRotate=!reduced;
+let current=0,playTimer=null,autoRotate=!reduced,visualMode="story",dateEditing=false;
 const chapters=[...document.querySelectorAll("article")];
-function select(i){current=Math.max(0,Math.min(moments.length-1,i));const m=moments[current];$("timeline").value=current;$("timeline").setAttribute("aria-valuetext",dateLabel(m.date)+", "+m.name);$("current-date").textContent=dateLabel(m.date);$("counter").textContent=String(current+1).padStart(2,"0")+" / 07";$("world-number").textContent=String(current+1).padStart(2,"0");$("planet-tag").textContent=m.name.toUpperCase();$("weather").innerHTML="<i></i>"+m.weather;$("weather").style.color=m.risk?"var(--red)":"var(--green)";$("previous").disabled=current===0;$("next").disabled=current===moments.length-1;document.querySelectorAll("#ticks button").forEach((b,k)=>b.setAttribute("aria-current",String(k===current)));$("announcement").textContent=dateLabel(m.date)+". "+m.name;const url=new URL(location.href);url.searchParams.set("date",m.date);history.replaceState(null,"",url);if(current===moments.length-1)stopPlay();}
-function go(i){select(i);chapters[current].scrollIntoView({behavior:reduced?"instant":"smooth",block:"start"});}
+function select(i){current=Math.max(0,Math.min(moments.length-1,i));const m=moments[current];if(!dateEditing){$("jump-date").value=m.date;$("date-feedback").textContent="Seven historical chapters · nearest date match";}$("timeline").value=current;$("timeline").setAttribute("aria-valuetext",dateLabel(m.date)+", "+m.name);$("current-date").textContent=dateLabel(m.date);$("counter").textContent=String(current+1).padStart(2,"0")+" / 07";$("world-number").textContent=String(current+1).padStart(2,"0");$("planet-tag").textContent=m.name.toUpperCase();$("weather").innerHTML="<i></i>"+m.weather;$("weather").style.color=m.risk?"var(--red)":"var(--green)";$("previous").disabled=current===0;$("next").disabled=current===moments.length-1;document.querySelectorAll("#ticks button").forEach((b,k)=>b.setAttribute("aria-current",String(k===current)));$("announcement").textContent=dateLabel(m.date)+". "+m.name;const url=new URL(location.href);url.searchParams.set("date",m.date);history.replaceState(null,"",url);if(current===moments.length-1)stopPlay();}
+function go(i){dateEditing=false;select(i);chapters[current].scrollIntoView({behavior:reduced?"instant":"smooth",block:"start"});}
 function stopPlay(){clearInterval(playTimer);playTimer=null;$("play").innerHTML="▶ <span>Play journey</span>";$("play").setAttribute("aria-label","Play guided journey");}
 document.querySelectorAll("[data-go]").forEach(b=>b.addEventListener("click",()=>{stopPlay();go(Number(b.dataset.go));}));
 $("previous").onclick=()=>{stopPlay();go(current-1);};$("next").onclick=()=>{stopPlay();go(current+1);};$("restart").onclick=()=>{stopPlay();go(0);};$("timeline").oninput=e=>{stopPlay();go(Number(e.target.value));};
 $("play").onclick=()=>{if(playTimer){stopPlay();return;}if(current===moments.length-1)go(0);else go(current);$("play").innerHTML="Ⅱ <span>Pause journey</span>";$("play").setAttribute("aria-label","Pause guided journey");playTimer=setInterval(()=>{if(document.hidden||$("about-dialog").open)return;go(current+1);},10000);};
-let ticking=false;addEventListener("scroll",()=>{if(ticking)return;ticking=true;requestAnimationFrame(()=>{const anchor=innerWidth<=800?Math.max(360,innerHeight*.46):innerHeight*.36;let best=0,distance=Infinity;chapters.forEach((c,i)=>{const r=c.getBoundingClientRect();const d=r.top<=anchor&&r.bottom>=anchor?0:Math.min(Math.abs(r.top-anchor),Math.abs(r.bottom-anchor));if(d<distance){distance=d;best=i;}});if(best!==current)select(best);ticking=false;});},{passive:true});
+let ticking=false;addEventListener("scroll",()=>{if(ticking)return;ticking=true;requestAnimationFrame(()=>{const anchor=innerWidth<=800?Math.max(465,innerHeight*.6):innerHeight*.36;let best=0,distance=Infinity;chapters.forEach((c,i)=>{const r=c.getBoundingClientRect();const d=r.top<=anchor&&r.bottom>=anchor?0:Math.min(Math.abs(r.top-anchor),Math.abs(r.bottom-anchor));if(d<distance){distance=d;best=i;}});if(best!==current)select(best);ticking=false;});},{passive:true});
 $("about").onclick=()=>{$("about-dialog").showModal();};$("close-about").onclick=()=>$("about-dialog").close();
 $("about-dialog").addEventListener("click",e=>{if(e.target===$("about-dialog")){const r=e.target.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)e.target.close();}});
 function updateRotationButton(){$("rotate").textContent=autoRotate?"Ⅱ":"▶";$("rotate").setAttribute("aria-label",autoRotate?"Pause planet rotation":"Resume planet rotation");$("rotate").setAttribute("aria-pressed",String(!autoRotate));}
 $("rotate").onclick=()=>{autoRotate=!autoRotate;updateRotationButton();};updateRotationButton();
 document.querySelector(".brand").onclick=e=>{e.preventDefault();stopPlay();go(0);};
 select(0);
-if(initialDate){const match=moments.findIndex(m=>m.date>=initialDate);requestAnimationFrame(()=>go(match<0?moments.length-1:match));}
+function jumpToDate(value){
+ const match=MarketDates.nearestDateIndex(value,moments.map(m=>m.date));
+ if(match<0){$("date-feedback").textContent="Enter a valid calendar date.";return;}
+ stopPlay();select(match);chapters[match].scrollIntoView({behavior:"instant",block:"start"});
+ $("jump-date").value=value;
+ $("date-feedback").textContent=value===moments[match].date?"Exact historical chapter": "Nearest chapter: "+dateLabel(moments[match].date)+" · no daily data for this date";
+}
+$("jump-date").addEventListener("focus",()=>{dateEditing=true;});
+$("jump-date").addEventListener("input",()=>{dateEditing=true;});
+$("date-form").addEventListener("submit",event=>{event.preventDefault();jumpToDate($("jump-date").value);});
+if(initialDate)requestAnimationFrame(()=>jumpToDate(initialDate));
+document.querySelectorAll("[data-effect]").forEach(button=>button.addEventListener("click",()=>{
+ visualMode=button.dataset.effect;
+ document.querySelectorAll("[data-effect]").forEach(b=>b.setAttribute("aria-pressed",String(b===button)));
+ $("effect-label").textContent=visualMode==="story"?"Illustrative weather":"Visual preview · not market data";
+ updatePlanet();
+}));
 
 const canvas=$("planet");
 const worldStyles=[
@@ -88,7 +104,11 @@ RealtimePlanetView.create(canvas).then(view=>{planetView=view;fallback.hidden=tr
 });
 function updatePlanet(){
  if(!planetView)return;
- const m=moments[current],style=worldStyles[current];
+ const m=moments[current],base=worldStyles[current];
+ const eruptions=[0,1,.18,.24,0,.65,.03],storms=[.14,.84,.4,1,.1,.7,.08];
+ const style={...base,visualMode,eruption:eruptions[current],storm:storms[current]};
+ if(visualMode==="volcano")Object.assign(style,{eruption:1,storm:.62,stress:.94,land:[.16,.075,.035],accent:[1,.25,.06]});
+ if(visualMode==="storm")Object.assign(style,{eruption:0,storm:1,accent:[.22,.37,.53]});
  planetView.setWorld({...style,name:m.name,moons:moonColors.map((color,i)=>({
    name:["Opportunity","Pressure","Uncertainty"][i],color,radius:[.105,.14,.075][i],
    orbit:1.75+i*.16-m.drift*.13,speed:[.14,-.09,.19][i],angle:[35,165,275][i]

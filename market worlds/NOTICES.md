@@ -20,6 +20,17 @@ Licence: MIT, retained in vendor/Planet3D/LICENSE and dist/licenses/Planet3D.txt
 
 The JavaScript model adapts Planet/Moon properties, circular orbit equations, parent-relative satellites, add_moon and add_ring. Motion uses elapsed time and independent moon angles. The unchanged Python source is retained in vendor/Planet3D/.
 
+## TerraForge3D
+
+Copyright (c) 2022 Jaysmito Mukherjee (jaysmito101@gmail.com).
+Repository: https://github.com/Jaysmito101/TerraForge3D
+Upstream revision: ac3b66085021848eb375bec39adda40cb04b4f28
+Licence: MIT, retained in vendor/TerraForge3D/LICENSE.md and dist/licenses/TerraForge3D.txt.
+
+The volcano mountain/crater masking and distorted radial height profile from Binaries/Data/shaders/generation/base_shape/volcano/shape.glsl is adapted to tangent-plane coordinates and conservative WebGL 2 height-field marching. Local texture noise replaces the upstream noise helpers. The unchanged volcano source is retained in vendor/TerraForge3D/. This is a focused browser port, not the desktop terrain editor or erosion pipeline.
+
+Additional Market Worlds changes on 14 November 2026: date matching, illustrative weather previews, emissive lava channels, ballistic fragments, volumetric ash, storm cloud cover and dimmed lighting.
+
 ## Corresponding source
 
 The combined demo and its modifications are distributed under GPL-3.0 while retaining the permissive notices above. dist/source.zip contains the application source, shader source, licences, upstream snapshots, run instructions, packaging script and regression tests. It excludes deployment credentials, Git metadata and its own generated ZIP. No build tools or undistributed assets are required to run the included application with a local HTTP server.
