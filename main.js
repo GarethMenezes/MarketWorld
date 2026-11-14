@@ -23,13 +23,10 @@ const CONFIG = {
   colorSensitivity: 20,
   glow: { base: 0.12, perMove: 1.4 },          // emissive = base + perMove * |t|
 
-  // Fault lines between sector plates from each pair's 60-day correlation:
-  //   glow = (corr - corrLow) / (corrHigh - corrLow), clamped → dark crack .. orange lava
-  //   2017 pairs average 0.31 (faint) · 2008-10-10 0.71 · 2020-03-20 0.85 (planet glows)
-  // Crisis-wide cracks across every plate from the 30-day average correlation.
-  faults: { corrLow: 0.35, corrHigh: 0.9, crackLow: 0.62, crackHigh: 0.88 },
-  // City lights on the night side from relative trading volume (1 = normal week)
-  cities: { base: 0.2, perVolume: 0.8, max: 1.6 },
+  // Continental drift from average sector correlation (30-day window).
+  //   pull = (corr - corrLow) / (corrHigh - corrLow), clamped to [0, 1]
+  //   2017 ≈ 0.1 → spread out · Oct 2008 ≈ 0.77 · Mar 2020 ≈ 0.86 → supercontinent
+  drift: { corrLow: 0.25, corrHigh: 0.82, homeAngle: [0.85, 1.2], supercontinentAngle: 0.4 },
 
   // Weather from VIX: storm = (vix - vixCalm) / vixRange, clamped to [0, 1]
   //   VIX 13 → clear blue sky · VIX 58+ → red sky, thick dark clouds
@@ -99,7 +96,7 @@ const sunDir = new THREE.Vector3(1, 0.5, 0.8).normalize();
 const sun = new THREE.DirectionalLight('#fff4e0', 2.4);
 sun.position.copy(sunDir).multiplyScalar(50);
 scene.add(sun);
-const ambient = new THREE.HemisphereLight('#9fb8ff', '#1a1020', 0.18); // low: the night side stays dark
+const ambient = new THREE.HemisphereLight('#9fb8ff', '#1a1020', 0.55);
 scene.add(ambient);
 
 // World group: everything that shakes in an earthquake
@@ -165,7 +162,7 @@ function makeNoiseTexture() {
   tex.needsUpdate = true;
   return tex;
 }
-const ATMO_CALM = new THREE.Color('#4f9dff');
+const ATMO_CALM = new THREE.Color('#4aa8ff');
 const ATMO_STORM = new THREE.Color('#ff4a2a');
 const planetUniforms = {
   uTime: { value: 0 },
@@ -183,7 +180,7 @@ const planetUniforms = {
   uAtmosphereColor: { value: ATMO_CALM.clone() },
   uAtmosphereDensity: { value: 0.3 },
   uSunIntensity: { value: 3 },
-  uAmbientLight: { value: 0.02 },
+  uAmbientLight: { value: 0.055 },
   uStorm: { value: 0 }, uEruption: { value: 0 }, uFlash: { value: 0 }, uStress: { value: 0 },
   uWaterDeep: { value: new THREE.Color(0.02, 0.05, 0.1) },
   uWaterSurface: { value: new THREE.Color(0.05, 0.16, 0.3) },
@@ -192,11 +189,7 @@ const planetUniforms = {
   uContinentDir: { value: Array.from({ length: 6 }, () => new THREE.Vector3(0, 0, 1)) },
   uContinentRot: { value: Array.from({ length: 6 }, () => new THREE.Matrix3()) },
   uContinentColor: { value: Array.from({ length: 6 }, () => new THREE.Color()) },
-  uContinentCap: { value: 0.72 },  // land fills most of each plate; seas along the faults
-  uPairGlow: { value: new Float32Array(36) },
-  uCrackAll: { value: 0 },
-  uCityLight: { value: new Float32Array(6) },
-  uTint: { value: new Float32Array(6).fill(0.12) },
+  uContinentCap: { value: 0.45 },
   uVentDir: { value: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)] },
 };
 const planet = new THREE.Mesh(new THREE.SphereGeometry(R * 1.85, 48, 32), new THREE.ShaderMaterial({
@@ -217,7 +210,7 @@ planet.frustumCulled = false;
 world.add(planet);
 
 // ───────────────────────────── CONTINENTS (sectors) ─────────────────────────────
-const CAP = 0.72;          // continent angular radius (radians), matches uContinentCap
+const CAP = 0.45;          // continent angular radius (radians)
 const RINGS = 14, SEGS = 56;
 const Z = new THREE.Vector3(0, 0, 1);
 
@@ -333,6 +326,9 @@ function makeMountainGeometry(seed) {
   return g;
 }
 
+// Glowing ring at each mountain's foot: colour = this week's return (red/yellow/green)
+const footRingGeometry = new THREE.RingGeometry(MOUNTAIN_RADIUS * 1.0, MOUNTAIN_RADIUS * 1.14, 48).rotateX(-Math.PI / 2);
+
 // Company names for labels and the info card
 const COMPANY = {
   AAPL: 'Apple', MSFT: 'Microsoft', NVDA: 'NVIDIA', GOOGL: 'Alphabet', ORCL: 'Oracle',
@@ -356,15 +352,9 @@ let tours = []; // filled in the GUIDED TOURS section; declared early so key han
 const N = data.dates.length;
 const stockIndex = Object.fromEntries(data.stocks.map((s) => [s.ticker, s]));
 
-// Fixed sector plates (no drift): the six directions of an octahedron, rotated so the default
-// view looks straight at the junction where Technology, Financials and Energy meet.
-// Each plate borders four others; opposite pairs share no border:
-// Technology–Healthcare, Financials–Consumer, Energy–Industrials.
-const qTilt = new THREE.Quaternion().setFromUnitVectors(
-  new THREE.Vector3(1, 1, 1).normalize(), new THREE.Vector3(0, 3.2, 15).normalize());
-const PLATE_DIRS = [[0, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, -1], [-1, 0, 0], [0, -1, 0]]
-  .map((v) => new THREE.Vector3(...v).applyQuaternion(qTilt));
-const markerGeometry = new THREE.SphereGeometry(0.045, 14, 10);
+// Continent placement: each sector sits on its own azimuth around a shared
+// "supercontinent" point. Drift only changes how far it is from that point.
+const qCenter = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.15);
 const continents = data.sectors.map((sector, i) => {
   const seed = i * 13.7 + 3.1;
   const tint = SECTOR_COLORS[sector.name] || '#88aa66';
@@ -378,8 +368,11 @@ const continents = data.sectors.map((sector, i) => {
   group.add(sectorLabel);
   land.userData.sector = sector.name;
   group.add(land);
-  group.quaternion.setFromUnitVectors(Z, PLATE_DIRS[i % 6]);
   world.add(group);
+
+  const azimuth = (i / data.sectors.length) * Math.PI * 2;
+  const qAz = qCenter.clone().multiply(new THREE.Quaternion().setFromAxisAngle(Z, azimuth));
+  const home = CONFIG.drift.homeAngle[i % 2];
 
   // Mountains: one per company, arranged on a small ring around the continent centre
   const mountains = sector.tickers.map((ticker, k) => {
@@ -389,26 +382,26 @@ const continents = data.sectors.map((sector, i) => {
     const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0,
       emissive: '#000000', emissiveIntensity: 1 });
     const mesh = new THREE.Mesh(makeMountainGeometry(k * 7.3 + i * 31.1), mat);
-    // Small glowing marker on the summit: colour = this week's return, brightness = size of move
-    const marker = new THREE.Mesh(markerGeometry, new THREE.MeshBasicMaterial({ color: '#ffd23a' }));
-    marker.userData = { ticker, sector: sector.name };
-    group.add(marker);
+    const ring = new THREE.Mesh(footRingGeometry, new THREE.MeshBasicMaterial({
+      color: '#ffd23a', transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    ring.position.copy(d).multiplyScalar(R + 0.012);
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+    group.add(ring);
     const label = makeLabel(ticker, 'tk', COMPANY[ticker]);
-    label.position.set(0, 0.09, 0);        // just above the marker
-    label.visible = false;
-    marker.add(label);
+    label.position.set(0, 1.08, 0); // just above the peak; follows the mountain's height
+    mesh.add(label);
     mesh.position.copy(d).multiplyScalar(R - 0.02); // shader surface is a sphere of radius R
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
-    mesh.userData = { ticker, sector: sector.name, stock: stockIndex[ticker], height: 0.2, targetHeight: 0.2, marker, label, dir: d,
+    mesh.userData = { ticker, sector: sector.name, stock: stockIndex[ticker], height: 0.2, targetHeight: 0.2, ring, label,
       color: new THREE.Color('#888888'), targetColor: new THREE.Color('#888888'), glow: 0, targetGlow: 0 };
     mesh.scale.set(1, 0.2, 1);
     group.add(mesh);
     return mesh;
   });
-  return { sector, group, land, mountains, sectorLabel };
+  return { sector, group, land, qAz, home, mountains, sectorLabel };
 });
 const allMountains = continents.flatMap((c) => c.mountains);
-const pickables = [...allMountains.map((m) => m.userData.marker), ...allMountains, ...continents.map((c) => c.land)];
+const pickables = [...allMountains, ...continents.map((c) => c.land)];
 
 // ───────────────────────────── MAPPINGS (data → visual targets) ─────────────────────────────
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
@@ -425,25 +418,17 @@ function colorFromReturn(ret, out) {
   return t < 0 ? out.copy(YELLOW).lerp(RED, -t) : out.copy(YELLOW).lerp(GREEN, t);
 }
 const stormFromVix = (vix) => clamp01((vix - CONFIG.storm.vixCalm) / CONFIG.storm.vixRange);
-const faultFromCorr = (c) => clamp01((c - CONFIG.faults.corrLow) / (CONFIG.faults.corrHigh - CONFIG.faults.corrLow));
-const cracksFromCorr = (c) => clamp01((c - CONFIG.faults.crackLow) / (CONFIG.faults.crackHigh - CONFIG.faults.crackLow));
-const SECTOR_NAMES = data.sectors.map((x) => x.name);
-function pairCorrAt(a, b, i) {
-  const pc = data.market.pairCorr || {};
-  const arr = pc[`${SECTOR_NAMES[a]}|${SECTOR_NAMES[b]}`] || pc[`${SECTOR_NAMES[b]}|${SECTOR_NAMES[a]}`];
-  return arr ? arr[i] : null;
-}
+const driftFromCorr = (c) => clamp01((c - CONFIG.drift.corrLow) / (CONFIG.drift.corrHigh - CONFIG.drift.corrLow));
 
 // Smoothed world state (follows the data targets)
 const state = {
   week: 0, playing: false, acc: 0,
   storm: 0, targetStorm: 0,
-  pairTarget: new Float32Array(36), crackTarget: 0, cityTarget: new Float32Array(6),
-  movers: [], hover: null, hoverDirty: false,
+  drift: 0, targetDrift: 0,
   quake: 0, flash: 0, vix: 15,
   eruption: 0, targetEruption: 0, vents: [0, 1],
   selected: null,
-  touring: false, tourStop: 0, tourWeek: -1, rotationPaused: false,
+  touring: false, tourStop: 0, rotationPaused: false,
 };
 
 function setWeek(i, { quake = true } = {}) {
@@ -452,18 +437,7 @@ function setWeek(i, { quake = true } = {}) {
   state.week = i;
   const m = data.market;
   if (m.vix[i] != null) { state.vix = m.vix[i]; state.targetStorm = stormFromVix(m.vix[i]); }
-  // Fault glow per sector pair (symmetric 6×6), crisis-wide cracks, city lights per sector
-  for (let a = 0; a < 6; a++) for (let b = 0; b < 6; b++) {
-    if (a === b) continue;
-    const c = pairCorrAt(a, b, i);
-    if (c != null) state.pairTarget[a * 6 + b] = faultFromCorr(c);
-  }
-  if (m.avgCorr[i] != null) state.crackTarget = cracksFromCorr(m.avgCorr[i]);
-  data.sectors.forEach((sec, k) => {
-    const vols = sec.tickers.map((t) => stockIndex[t].relVolume[i]).filter((v) => v != null);
-    const rv = vols.length ? vols.reduce((x, y) => x + y, 0) / vols.length : 1;
-    state.cityTarget[k] = Math.min(CONFIG.cities.max, Math.max(0.05, CONFIG.cities.base + CONFIG.cities.perVolume * (rv - 0.6)));
-  });
+  if (m.avgCorr[i] != null) state.targetDrift = driftFromCorr(m.avgCorr[i]);
   if (quake && i !== prev && m.ret[i] != null && m.ret[i] < CONFIG.quakeRet) {
     state.quake = Math.max(state.quake, Math.min(1, m.ret[i] / -0.15));
   }
@@ -484,17 +458,6 @@ function setWeek(i, { quake = true } = {}) {
       colorFromReturn(r, u.targetColor);
       u.targetGlow = CONFIG.glow.base + CONFIG.glow.perMove * Math.min(1, Math.abs(r * CONFIG.colorSensitivity));
     }
-  }
-  // This week's 3 biggest gainers and 3 biggest losers get labels
-  const ranked = allMountains.filter((mm) => mm.visible && mm.userData.stock.ret[i] != null)
-    .sort((x, y) => y.userData.stock.ret[i] - x.userData.stock.ret[i]);
-  state.movers = [...ranked.slice(0, 3), ...ranked.slice(-3)]
-    .sort((x, y) => Math.abs(y.userData.stock.ret[i]) - Math.abs(x.userData.stock.ret[i]));
-  for (const mm of allMountains) {
-    const u = mm.userData, r = u.stock.ret[i];
-    u.label.element.textContent = state.movers.includes(mm) ? `${u.ticker} ${pct(r)}` : u.ticker;
-    u.label.element.classList.toggle('up', state.movers.includes(mm) && r > 0);
-    u.label.element.classList.toggle('down', state.movers.includes(mm) && r < 0);
   }
   updateStatsPanel();
   updateInfoPanel();
@@ -541,8 +504,8 @@ function corrLabel(c) {
   if (c == null) return '';
   if (c < 0.35) return 'moving independently';
   if (c < 0.6) return 'loosely linked';
-  if (c < 0.75) return 'moving together';
-  return 'locked together';
+  if (c < 0.75) return 'drifting together';
+  return 'supercontinent';
 }
 
 // Card headline and phase come straight from the numbers (no invented narrative)
@@ -550,7 +513,7 @@ function weekStory(i) {
   const m = data.market, v = m.vix[i], c = m.avgCorr[i], r = m.ret[i];
   if (r != null && r < CONFIG.quakeRet) return { phase: 'Crash week', risk: true, world: 'The erupting world', headline: 'The ground gives way.' };
   if (v != null && v >= 40) return { phase: 'Panic', risk: true, world: 'The storm world', headline: 'Fear everywhere.' };
-  if (c != null && c > 0.75) return { phase: 'Everything moves together', risk: true, world: 'The cracking world', headline: 'No place to hide.' };
+  if (c != null && c > 0.75) return { phase: 'Everything moves together', risk: true, world: 'The supercontinent', headline: 'No place to hide.' };
   if (v != null && v >= 25) return { phase: 'Stressed', risk: true, world: 'The restless world', headline: 'Clouds gathering.' };
   if (c != null && c < 0.35) return { phase: 'Calm', risk: false, world: 'The open world', headline: 'Every sector on its own path.' };
   return { phase: 'Normal', risk: false, world: 'The steady world', headline: 'Business as usual.' };
@@ -560,11 +523,9 @@ function updateStatsPanel() {
   const i = state.week, m = data.market;
   const story = weekStory(i);
   $('date').textContent = fmtDate(data.dates[i]);
-  // One headline: the tour stop's headline while touring that week, otherwise the data's
-  const tour = state.touring && state.tourWeek === i ? tours[state.tourStop] : null;
-  $('phase').textContent = tour ? (tour.phase || tour.title) : story.phase;
-  $('phase').classList.toggle('risk', tour ? !!tour.risk : story.risk);
-  $('headline').textContent = tour ? (tour.headline || tour.title) : story.headline;
+  $('phase').textContent = story.phase;
+  $('phase').classList.toggle('risk', story.risk);
+  $('headline').textContent = story.headline;
   $('planetTag').textContent = story.world;
   $('planetTag').classList.toggle('risk', story.risk);
   $('weekNo').textContent = String(i + 1).padStart(4, '0');
@@ -681,12 +642,14 @@ const AXIS_X = new THREE.Vector3(1, 0, 0);
 const tourQ = new THREE.Quaternion(), tmpV = new THREE.Vector3();
 const fly = { active: false, t: 0, fromDir: new THREE.Vector3(), toDir: new THREE.Vector3(), fromDist: 0, toDist: 0 };
 
-// Where a focus sits on the planet (plates are fixed)
+// Where a focus sits on the planet once drift reaches this week's target
 function focusDirection(focus, out) {
   const sectorName = stockIndex[focus]?.sector ?? focus;
-  const k = SECTOR_NAMES.indexOf(sectorName);
-  if (k === -1) return out.set(0, 3.2, 15).normalize(); // "market": the default overview
-  return out.copy(PLATE_DIRS[k]);
+  const c = continents.find((x) => x.sector.name === sectorName);
+  if (!c) return out.copy(Z).applyQuaternion(qCenter); // "market": the supercontinent point
+  const angle = c.home + (CONFIG.drift.supercontinentAngle - c.home) * state.targetDrift;
+  tourQ.multiplyQuaternions(c.qAz, tourQ.setFromAxisAngle(AXIS_X, angle));
+  return out.copy(Z).applyQuaternion(tourQ);
 }
 
 function startFly(dir, dist) {
@@ -714,8 +677,7 @@ function goToStop(i) {
   const t = tours[state.tourStop];
   setPlaying(false);
   const w = data.dates.findIndex((d) => d >= t.date);
-  state.tourWeek = w === -1 ? N - 1 : w;
-  setWeek(state.tourWeek);
+  setWeek(w === -1 ? N - 1 : w);
   controls.autoRotate = false;
   if (stockIndex[t.focus]) select({ ticker: t.focus, sector: stockIndex[t.focus].sector });
   else if (data.sectors.some((x) => x.name === t.focus)) select({ ticker: null, sector: t.focus });
@@ -726,6 +688,9 @@ function goToStop(i) {
   $('tourNum').textContent = String(state.tourStop + 1).padStart(2, '0');
   $('tourStep').textContent = `Stop ${state.tourStop + 1} of ${tours.length}`;
   $('tourDate').textContent = fmtDate(data.dates[state.week]);
+  $('tourPhase').textContent = t.phase || t.title;
+  $('tourPhase').classList.toggle('risk', !!t.risk);
+  $('tourTitle').textContent = t.headline || t.title;
   $('tourSummary').textContent = t.summary || (t.headline ? t.title : '');
   $('tourSummary').style.display = $('tourSummary').textContent ? '' : 'none';
   $('tourText').textContent = t.narration || '';
@@ -735,14 +700,12 @@ function goToStop(i) {
   $('tourOutcomes').innerHTML = (t.good ? `<div class="outcome"><span class="symbol">↗</span><div><h3>THE GOOD / OPPORTUNITY</h3><p>${t.good}</p></div></div>` : '') +
     (t.bad ? `<div class="outcome bad"><span class="symbol">↘</span><div><h3>THE BAD / PRESSURE</h3><p>${t.bad}</p></div></div>` : '');
   $('tourSource').innerHTML = t.url ? `Source: <a href="${t.url}" target="_blank" rel="noopener noreferrer">${t.source} ↗</a>` : '';
-  updateStatsPanel(); // the single headline now shows this stop
   $('story').scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function exitTour() {
   state.touring = false;
   $('tour').style.display = 'none';
-  updateStatsPanel();
   controls.autoRotate = !state.playing && !state.rotationPaused;
 }
 
@@ -786,25 +749,6 @@ const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 let downAt = null;
 canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
-// Hover: remember the pointer; the raycast happens once per frame in animate()
-const hoverPointer = new THREE.Vector2(-9, -9);
-canvas.addEventListener('pointermove', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  hoverPointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
-  state.hoverDirty = true;
-});
-canvas.addEventListener('pointerleave', () => { hoverPointer.set(-9, -9); state.hoverDirty = true; });
-const hoverHits = [];
-function updateHover() {
-  if (!state.hoverDirty) return;
-  state.hoverDirty = false;
-  hoverHits.length = 0;
-  raycaster.setFromCamera(hoverPointer, camera);
-  raycaster.intersectObjects(pickables, false, hoverHits);
-  const hit = hoverHits.find((h) => h.object.visible || h.object.userData.sector);
-  state.hover = hit ? hit.object.userData : null;
-  canvas.style.cursor = hit ? 'pointer' : '';
-}
 canvas.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   const rect = canvas.getBoundingClientRect();
@@ -839,36 +783,10 @@ function facing(obj) {
   toCam.copy(camera.position).sub(labelPos).normalize();
   return labelPos.sub(world.position).normalize().dot(toCam) > 0.15;
 }
-// Greedy placement in priority order: hovered stock, this week's biggest movers, sector names.
-// A label is skipped if its screen box would overlap one already placed.
-const rects = new Float32Array(4 * 48);
-let rectCount = 0;
-const projV = new THREE.Vector3();
-function place(obj, charW, h) {
-  if (!facing(obj)) return false;
-  obj.getWorldPosition(projV).project(camera);
-  const x = (projV.x * 0.5 + 0.5) * labelW, y = (-projV.y * 0.5 + 0.5) * labelH;
-  const half = (obj.element.textContent.length * charW + 10) / 2;
-  const x0 = x - half, x1 = x + half, y0 = y - h - 10, y1 = y - 6;
-  for (let r = 0; r < rectCount; r++) {
-    const o = r * 4;
-    if (x0 < rects[o + 2] && x1 > rects[o] && y0 < rects[o + 3] && y1 > rects[o + 1]) return false;
-  }
-  if (rectCount < 48) { const o = rectCount * 4; rects[o] = x0; rects[o + 1] = y0; rects[o + 2] = x1; rects[o + 3] = y1; rectCount++; }
-  return true;
-}
-let labelW = 1, labelH = 1;
 function updateLabels() {
-  labelW = canvas.clientWidth; labelH = canvas.clientHeight;
-  rectCount = 0;
-  for (const m of allMountains) m.userData.label.visible = false;
-  const hovered = state.hover?.ticker ? allMountains.find((m) => m.userData.ticker === state.hover.ticker) : null;
-  if (hovered && hovered.visible) hovered.userData.label.visible = place(hovered.userData.label, 7, 14);
-  for (const m of state.movers) {
-    if (m === hovered || !m.visible) continue;
-    m.userData.label.visible = place(m.userData.label, 7, 14);
-  }
-  for (const c of continents) c.sectorLabel.visible = place(c.sectorLabel, 10, 12);
+  const close = camera.position.length() < 18;
+  for (const c of continents) c.sectorLabel.visible = facing(c.sectorLabel);
+  for (const m of allMountains) m.userData.label.visible = close && m.visible && facing(m.userData.label);
 }
 
 function animate() {
@@ -886,16 +804,12 @@ function animate() {
     }
   }
 
-  updateHover();
-
-  // Fault lines (pair correlation), crisis cracks (average correlation), city lights (volume)
-  const pu0 = planetUniforms;
-  for (let q = 0; q < 36; q++) pu0.uPairGlow.value[q] += (state.pairTarget[q] - pu0.uPairGlow.value[q]) * k;
-  pu0.uCrackAll.value += (state.crackTarget - pu0.uCrackAll.value) * k;
-  for (let q = 0; q < 6; q++) {
-    pu0.uCityLight.value[q] += (state.cityTarget[q] - pu0.uCityLight.value[q]) * k;
-    const tint = state.hover && state.hover.sector === SECTOR_NAMES[q] ? 0.45 : 0.12; // brighter on hover
-    pu0.uTint.value[q] += (tint - pu0.uTint.value[q]) * Math.min(1, k * 3);
+  // Continental drift: correlation pulls every continent toward the supercontinent point
+  state.drift += (state.targetDrift - state.drift) * k * 0.6;
+  for (const c of continents) {
+    const angle = c.home + (CONFIG.drift.supercontinentAngle - c.home) * state.drift;
+    tmpQ.setFromAxisAngle(X, angle);
+    c.group.quaternion.multiplyQuaternions(c.qAz, tmpQ);
   }
 
   // Mountains: height = growth, colour = weekly return
@@ -903,14 +817,14 @@ function animate() {
     const u = m.userData;
     u.height += (u.targetHeight - u.height) * k;
     m.scale.set(0.7 + 0.6 * u.height, u.height, 0.7 + 0.6 * u.height); // big mountains are also broader
-    u.marker.position.copy(u.dir).multiplyScalar(R - 0.02 + u.height + 0.05);    // sits on the summit
+    u.ring.scale.setScalar(0.7 + 0.6 * u.height);
     u.color.lerp(u.targetColor, k);
     u.glow += (u.targetGlow - u.glow) * k;
-    m.material.color.copy(WHITE);                                  // natural rock and snow
-    m.material.emissive.setRGB(0, 0, 0);
-    // Marker: return colour, HDR brightness so big moves bloom
-    u.marker.material.color.copy(u.color).multiplyScalar(0.8 + 2.2 * Math.min(1, u.glow));
-    u.marker.visible = m.visible;
+    m.material.color.copy(WHITE).lerp(u.color, 0.08);             // natural rock; the return shows in the foot ring
+    m.material.emissive.copy(u.color).multiplyScalar(u.glow * 0.06);
+    u.ring.material.color.copy(u.color);                          // the clear signal: glowing foot ring
+    u.ring.material.opacity = 0.15 + 0.6 * Math.min(1, u.glow);
+    u.ring.visible = m.visible;
   }
 
   // Weather: VIX → sky colour, atmosphere, clouds, sunlight
@@ -925,10 +839,10 @@ function animate() {
   pu.uAtmosphereColor.value.copy(ATMO_CALM).lerp(ATMO_STORM, s); // blue → red with fear
   pu.uAccent.value.copy(pu.uAtmosphereColor.value);
   pu.uSunIntensity.value = CONFIG.planetLight * (1 - 0.55 * s);    // storms dim the sun
-  pu.uAmbientLight.value = 0.02 + 0.015 * s;   // dark night side
+  pu.uAmbientLight.value = 0.055 + 0.025 * s;
   sun.intensity = 2.4 - 1.1 * s;
 
-  // Plates for the shader: centre direction + world→local rotation (fixed; cheap to refresh)
+  // Continents for the shader: centre direction + world→local rotation (terrain drifts with them)
   pu.uPlanetPosition.value.copy(world.position);
   for (let c = 0; c < continents.length; c++) {
     const q = continents[c].group.quaternion;
@@ -948,7 +862,7 @@ function animate() {
   }
   state.flash *= Math.exp(-dt * 14);
   pu.uFlash.value = state.flash;
-  ambient.intensity = 0.18 + state.flash * 1.5;
+  ambient.intensity = 0.55 + state.flash * 1.5;
   scene.background.lerp(FLASH_SKY, state.flash * 0.6);
 
   // Earthquake: the planet shakes in crash weeks
@@ -979,10 +893,7 @@ function weekFromUrl() {
 const start = weekFromUrl() ?? data.dates.findIndex((d) => d >= '2007-06-29');
 setWeek(start, { quake: false });
 // Jump straight to the starting state (no slow fade-in on load)
-state.storm = state.targetStorm;
-planetUniforms.uPairGlow.value.set(state.pairTarget);
-planetUniforms.uCrackAll.value = state.crackTarget;
-planetUniforms.uCityLight.value.set(state.cityTarget);
+state.storm = state.targetStorm; state.drift = state.targetDrift;
 for (const m of allMountains) {
   const u = m.userData; u.height = u.targetHeight; u.color.copy(u.targetColor); u.glow = u.targetGlow;
 }

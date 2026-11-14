@@ -14,10 +14,7 @@
 // Further modified for Market Worlds (sota branch), 14 Nov 2026:
 //  - runs inside a Three.js ShaderMaterial on a back-faced sphere; rays come from the
 //    Three.js camera and the shader writes gl_FragDepth so mesh mountains sit on it
-//  - land only inside six fixed sector plates (uContinentDir/Rot/Color)
-//  - glowing fault lines on plate borders from pair correlation, crisis-wide cracks,
-//    night-side city lights from trading volume, ocean sun glint, thin atmosphere
-//  - volcanoes and ash scaled down to stay close to the surface
+//  - land only inside six sector continents (uContinentDir/Rot/Color), which drift
 //  - storm, eruption, flash, atmosphere colour are driven by market data in main.js
 //  - rings, moons and the planet's own spin removed (not data-driven)
 //  - tone mapping/gamma removed: Three.js OutputPass applies ACES + sRGB
@@ -49,20 +46,14 @@ uniform float uStorm, uEruption, uFlash, uStress;
 uniform vec3 uWaterDeep, uWaterSurface, uRockColor, uAccent;
 
 uniform vec3 uContinentDir[6];  // continent centres (unit vectors, world)
-uniform mat3 uContinentRot[6];  // world → continent-local rotation
+uniform mat3 uContinentRot[6];  // world → continent-local rotation (terrain moves with drift)
 uniform vec3 uContinentColor[6];
 uniform float uContinentCap;    // continent angular radius (radians)
 uniform vec3 uVentDir[2];       // volcano axes (unit vectors, world)
-uniform float uPairGlow[36];    // fault glow per sector pair, 0 faint crack .. 1 lava (pair correlation)
-uniform float uCrackAll;        // crisis-wide secondary cracks (average correlation)
-uniform float uCityLight[6];    // night-side city lights per sector (relative trading volume)
-uniform float uTint[6];         // sector colour tint strength (brighter on hover)
-
-vec3 gEmit = vec3(0.);          // unlit emission from the planet surface (lava faults, cities)
 
 // Shader works in the original units: planet radius 2 at the origin.
 #define R_PLANET 2.0
-#define SAND_COLOR vec3(.72, .66, .5)
+#define SAND_COLOR vec3(1.0, 1.0, 0.85)
 #define ICE_COLOR mix(vec3(.8,.9,.9),uRockColor*.6,uStress)
 #define CLOUD_COLOR vec3(1.)
 #define WATER_SURFACE_LEVEL 0.0
@@ -157,23 +148,24 @@ vec3 atmosphereColor(vec3 ro, vec3 rd, float spaceMask) {
   float planetEdge = max(R_PLANET - distFromEdge, 0.) / R_PLANET;
   float planetMask = 1.0 - spaceMask;
   float atmosphereMask = pow(max(0., remap(dot(uSunDirection, coordFromCenter), -R_PLANET, R_PLANET / 2., 0., 1.)), 5.);
-  atmosphereMask = max(atmosphereMask, .3) * uAtmosphereDensity * R_PLANET * uSunIntensity; // keep a faint rim on the night side
+  atmosphereMask = max(atmosphereMask, .18) * uAtmosphereDensity * R_PLANET * uSunIntensity; // keep a faint rim on the night side
   vec3 a = vec3(pow(planetEdge, 120.)) * .5;
   a += pow(planetEdge, 50.) * .3 * (1.5 - planetMask);
-  a += pow(planetEdge, 22.) * .02;   // thin rim only
+  a += pow(planetEdge, 15.) * .03;
+  a += pow(planetEdge, 5.) * .04 * planetMask;
   return a * uAtmosphereColor * atmosphereMask;
 }
 
 //=========== Volcanoes — Gareth's additions; profile adapted from TerraForge3D ===========//
 // TerraForge3D volcano/shape.glsl, Copyright (c) 2022 Jaysmito Mukherjee, MIT.
 float coneSDF(vec3 p, int i) {
-  vec3 n = uVentDir[i], q = p - n * (R_PLANET - .03);
+  vec3 n = uVentDir[i], q = p - n * (R_PLANET - .045);
   float h = dot(q, n), radius = length(q - n * h);
-  float r = max(0., radius + (noise(q * 40.) - .5) * .01);
-  float craterRadius = .035, mountainOuter = .15;           // scaled down: stays near the surface
+  float r = max(0., radius + (noise(q * 24.) - .5) * .018);
+  float craterRadius = .067, mountainOuter = .29;
   float mountainMask = 1. - smoothstep(craterRadius * .5, mountainOuter, r);
   float craterMask = 1. - smoothstep(0., craterRadius, r);
-  float height = .16 * mountainMask - .16 * .9 * .3 * craterMask;
+  float height = .34 * mountainMask - .34 * .9 * .3 * craterMask;
   height += (noise(q * 60.) - .5) * .018 * smoothstep(craterRadius, mountainOuter, r) * mountainMask;
   return max(max(h - height * uEruption, -h), radius - mountainOuter) * .38;
 }
@@ -187,7 +179,7 @@ vec3 lavaEmission(vec3 p) {
     float flow = sin(atan(dot(q, b), dot(q, t)) * 7. + r * 16. + noise(p * 9.) * 7. - uTime * .9);
     float channel = 1. - smoothstep(.035, .14, abs(flow));
     float pool = 1. - smoothstep(.035, .12, r);
-    glow += max(channel * .7, pool) * exp(-r * 8.) * step(r, .4);
+    glow += max(channel * .7, pool) * exp(-r * 3.8) * step(r, .95);
   }
   return mix(vec3(5., .17, .008), vec3(8., 1.9, .09), clamp(glow, 0., 1.)) * glow * uEruption;
 }
@@ -195,7 +187,7 @@ Hit intersectVolcano(vec3 ro, vec3 rd) {
   if(uEruption < .01) return miss;
   Hit result = miss;
   for(int i = 0; i < 2; i++) {
-    float start = sphIntersect(ro, rd, uVentDir[i] * (R_PLANET + .05), .22);
+    float start = sphIntersect(ro, rd, uVentDir[i] * (R_PLANET + .12), .48);
     if(start < 0.) continue;
     float t = start;
     for(int j = 0; j < 28; j++) {
@@ -209,7 +201,7 @@ Hit intersectVolcano(vec3 ro, vec3 rd) {
         break;
       }
       t += max(d, .004);
-      if(t > start + .46) break;
+      if(t > start + .98) break;
     }
   }
   return result;
@@ -219,22 +211,22 @@ vec4 volcanicAtmosphere(vec3 ro, vec3 rd, vec4 background, float sceneDepth) {
   if(uEruption < .01) return background;
   vec4 result = background;
   for(int i = 0; i < 2; i++) {
-    vec3 axis = uVentDir[i], vent = axis * (R_PLANET + .1);
-    float start = sphIntersect(ro, rd, vent + axis * .2, .34);
+    vec3 axis = uVentDir[i], vent = axis * (R_PLANET + .30);
+    float start = sphIntersect(ro, rd, vent + axis * .48, .77);
     if(start < 0.) continue;
     vec3 smoke = vec3(0.); float alpha = 0.;
-    for(int j = 0; j < 20; j++) {
-      float t = start + float(j) * .034;
+    for(int j = 0; j < 22; j++) {
+      float t = start + float(j) * .065;
       if(t >= sceneDepth) break;
       vec3 p = ro + rd * t - vent;
       float h = dot(p, axis);
-      float radius = length(p - axis * h - vec3(.3, 0., -.1) * h * h);
-      float width = .025 + max(h, 0.) * .2;
-      float shape = (1. - smoothstep(width * .35, width, radius)) * smoothstep(-.04, .03, h) * (1. - smoothstep(.3, .42, h));
-      float turbulence = fbm(p * 11. - axis * uTime * .4, 3, .5, 2., 1.);
+      float radius = length(p - axis * h - vec3(.15, 0., -.05) * h * h);
+      float width = .055 + max(h, 0.) * .26;
+      float shape = (1. - smoothstep(width * .35, width, radius)) * smoothstep(-.08, .06, h) * (1. - smoothstep(.85, 1.15, h));
+      float turbulence = fbm(p * 6. - axis * uTime * .65, 3, .5, 2., 1.);
       float density = shape * smoothstep(.22, .65, turbulence) * uEruption;
       float a = 1. - exp(-density * .5);
-      float heat = exp(-max(h, 0.) * 16.) * (1. - smoothstep(.005, .05, radius));
+      float heat = exp(-max(h, 0.) * 8.) * (1. - smoothstep(.01, .1, radius));
       vec3 smokeColor = mix(vec3(.055, .059, .063), vec3(.19, .17, .15), turbulence) + vec3(7., 1.15, .025) * heat;
       smoke += (1. - alpha) * a * smokeColor;
       alpha += (1. - alpha) * a;
@@ -245,38 +237,12 @@ vec4 volcanicAtmosphere(vec3 ro, vec3 rd, vec4 background, float sceneDepth) {
     vec3 tangent = normalize(cross(axis, abs(axis.y) > .95 ? vec3(1., 0., 0.) : vec3(0., 1., 0.))), bitangent = cross(axis, tangent);
     for(int k = 0; k < 12; k++) {
       float id = float(k), life = fract(uTime * .42 + id * .0833), angle = id * 2.39996;
-      vec3 particle = vent + axis * (life * .55 - life * life * .62) + (tangent * cos(angle) + bitangent * sin(angle)) * life * .14;
-      float hit = sphIntersect(ro, rd, particle, .005 * (1. - life) + .0025);
+      vec3 particle = vent + axis * (life * 1.45 - life * life * 1.65) + (tangent * cos(angle) + bitangent * sin(angle)) * life * .36;
+      float hit = sphIntersect(ro, rd, particle, .009 * (1. - life) + .004);
       if(hit > 0. && hit < sceneDepth) { result.rgb += vec3(5., .8, .015) * (1. - life) * uEruption; result.a = 1.; }
     }
   }
   return result;
-}
-
-//===================== Market Worlds: fault lines =====================//
-// Plates are the Voronoi cells of the six sector centres. On the border between
-// plates a and b the crack glows with that pair's correlation (uPairGlow).
-vec3 faultLines(vec3 n, out float darken) {
-  int a = 0, b = 1; float da = -2., db = -2.;
-  for(int i = 0; i < 6; i++) {
-    float d = dot(n, uContinentDir[i]);
-    if(d > da) { db = da; b = a; da = d; a = i; } else if(d > db) { db = d; b = i; }
-  }
-  float warp = (noise(n * 16.) - .5) * .05 + (noise(n * 47.) - .5) * .018;  // jagged, not straight
-  float dist = abs(da - db + warp);
-  float g = uPairGlow[a * 6 + b];
-  float line = 1. - smoothstep(.0012, .005 + .008 * g, dist);
-  float halo = 1. - smoothstep(0., .035 + .03 * g, dist);
-  // In a crisis, cracks branch out from the faults across the plates (average correlation).
-  // They spread further as correlation rises but stay thinner and dimmer than the borders.
-  vec3 wp = n * 6. + vec3(noise(n * 5.), noise(n * 5. + 9.), 0.) * 1.6;      // domain warp: jagged
-  float c1 = pow(1. - abs(noise(wp + 3.) * 2. - 1.), 60.);
-  float c2 = pow(1. - abs(noise(wp * 2.3 + 11.) * 2. - 1.), 90.) * .7;
-  float reach = 1. - smoothstep(.04, .06 + .3 * uCrackAll, dist);           // grows out from the faults
-  float cracks = max(c1, c2) * reach * smoothstep(0., .3, uCrackAll);
-  darken = clamp(line * (.35 + .55 * g) + cracks * .6, 0., 1.);
-  vec3 lava = vec3(4.5, .9, .06);
-  return lava * (line * g * g * 1.3 + halo * g * g * g * .22 + cracks * .45 * uCrackAll);
 }
 
 //========================== Ray tracing ==========================//
@@ -289,11 +255,8 @@ Hit intersectPlanet(vec3 ro, vec3 rd) {
   float altitude = terrainAltitude(n, best);
   vec3 normal = planetNormal(position);
 
-  // Natural land colours; the sector colour is only a subtle tint (brighter on hover)
-  float dry = noise(n * 11. + float(best) * 3.);
-  vec3 natural = mix(vec3(.06, .12, .045), vec3(.2, .17, .1), smoothstep(.35, .75, dry));
-  vec3 tree = mix(natural, uContinentColor[best] * .3, uTint[best]);
-  vec3 rock = mix(uRockColor, uContinentColor[best] * .45, uTint[best] * .6);
+  vec3 tree = uContinentColor[best] * .35;                       // each sector its own colour
+  vec3 rock = mix(uRockColor, uContinentColor[best] * .5, .35);
   vec3 color = mix(uWaterDeep, uWaterSurface, smoothstep(WATER_SURFACE_LEVEL - .03, WATER_SURFACE_LEVEL + TRANSITION, altitude));
   color = mix(color, SAND_COLOR, smoothstep(SAND_LEVEL, SAND_LEVEL + TRANSITION / 2., altitude));
   color = mix(color, tree, smoothstep(TREE_LEVEL, TREE_LEVEL + TRANSITION, altitude));
@@ -314,20 +277,8 @@ Hit intersectPlanet(vec3 ro, vec3 rd) {
   float coastGlow = 1. - smoothstep(.002, .012, abs(altitude - SAND_LEVEL));
   color += uAccent * coastGlow * uStress * .18;
 
-  // Fault lines on plate borders (pair correlation) darken the ground and glow as lava
-  float faultDark;
-  gEmit = faultLines(n, faultDark);
-  color = mix(color, vec3(.025, .02, .018), faultDark);
-
-  // City lights on the night side, brightness from the sector's relative trading volume
-  float land = smoothstep(SAND_LEVEL, TREE_LEVEL + .01, altitude);
-  float night = smoothstep(.06, -.2, dot(n, uSunDirection));
-  vec3 local = uContinentRot[best] * n;
-  float city = smoothstep(.6, .82, noise(local * 95.)) * smoothstep(.42, .7, noise(local * 9. + 4.));
-  gEmit += vec3(1., .7, .36) * city * land * night * uCityLight[best] * 1.8 * (1. - max(clouds, stormCover * .8));
-
   float specular = 1. - smoothstep(SAND_LEVEL, SAND_LEVEL + TRANSITION, altitude);
-  return Hit(len, normal, Material(color, 1., specular * (1. - stormCover) * (1. - clouds)));
+  return Hit(len, normal, Material(color, 1., specular * (1. - stormCover)));
 }
 
 void main() {
@@ -338,7 +289,7 @@ void main() {
 
   Hit hit = intersectPlanet(ro, rd);
   Hit volcano = intersectVolcano(ro, rd);
-  if(volcano.len < hit.len) { hit = volcano; gEmit = vec3(0.); }
+  if(volcano.len < hit.len) hit = volcano;
 
   vec4 color = vec4(0.);
   float spaceMask = 1.;
@@ -348,9 +299,8 @@ void main() {
     float direct = pow(clamp(dot(hit.normal, uSunDirection), 0.0, 1.0), 2.) * uSunIntensity;
     vec3 diffuse = hit.material.color * (uAmbientLight + direct * SUN_COLOR);
     vec3 reflected = normalize(reflect(-uSunDirection, hit.normal));
-    float spec = max(0.0, dot(rd, reflected));
-    float glint = pow(spec, 90.) * 3.5 + pow(spec, 12.) * .12;     // sunlight glinting off the ocean
-    color = vec4(diffuse + hit.material.specular * glint * uSunIntensity * SUN_COLOR + gEmit, 1.);
+    float phong = pow(max(0.0, dot(rd, reflected)), 10.) * .2 * uSunIntensity;
+    color = vec4(diffuse + hit.material.specular * vec3(phong), 1.);
     if(length(hitPosition) < R_PLANET + .4) color.rgb += lavaEmission(hitPosition);
   }
   color.rgb += atmosphereColor(ro, rd, spaceMask) * (1. - uStorm * .55);

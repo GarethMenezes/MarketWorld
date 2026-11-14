@@ -8,8 +8,7 @@ JSON contract (keep in sync with main.js and server/app.py):
   "dates":   ["2007-01-05", ...],                       # weekly, Fridays
   "sectors": [{"name", "tickers", "ret": [], "vol": []}],
   "stocks":  [{"ticker", "sector", "growth": [], "ret": [], "vol": [], "relVolume": []}],
-  "market":  {"ret": [], "vix": [], "avgCorr": [],
-              "pairCorr": {"Technology|Financials": [], ...}}   # 60-day, all 15 pairs
+  "market":  {"ret": [], "vix": [], "avgCorr": []}
 }
 Every array has one value per date; null = no data.
 """
@@ -31,8 +30,7 @@ SECTORS = {
 }
 VIX = "^VIX"
 VOL_WINDOW = 20      # trading days for volatility
-CORR_WINDOW = 30     # trading days for average sector correlation (30 reacts to crashes quickly)
-PAIR_CORR_WINDOW = 60  # trading days for each sector-pair correlation (fault lines)
+CORR_WINDOW = 30     # trading days for sector correlation (30 reacts to crashes quickly)
 VOLUME_WINDOW = 52   # weeks for "normal" trading volume
 
 ROOT = Path(__file__).parent
@@ -117,21 +115,11 @@ def build(close, volume):
     avg_corr[corr.groupby(level=0).count().sum(axis=1) < n * n] = np.nan
     wk_corr = avg_corr.resample("W-FRI").last()
 
-    # Pairwise sector correlation, rolling 60 trading days → fault-line glow between plates.
-    # Keys "A|B" in SECTORS order (A before B).
-    names = list(sector_daily)
-    pair_corr = {}
-    for a in range(len(names)):
-        for b in range(a + 1, len(names)):
-            pc = sec[names[a]].rolling(PAIR_CORR_WINDOW, min_periods=PAIR_CORR_WINDOW).corr(sec[names[b]])
-            pair_corr[f"{names[a]}|{names[b]}"] = clean(pc.resample("W-FRI").last().reindex(dates), 3)
-
     all_stocks = [t for ts in SECTORS.values() for t in ts if t in close.columns]
     market = {
         "ret": clean(wk_ret[all_stocks].mean(axis=1)),
         "vix": clean(wk_close[VIX], 2) if VIX in wk_close else [None] * len(dates),
         "avgCorr": clean(wk_corr.reindex(dates), 3),
-        "pairCorr": pair_corr,
     }
     return {
         "dates": [d.strftime("%Y-%m-%d") for d in dates],
