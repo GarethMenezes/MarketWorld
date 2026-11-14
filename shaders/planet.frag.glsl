@@ -14,7 +14,10 @@
 // Further modified for Market Worlds (sota branch), 14 Nov 2026:
 //  - runs inside a Three.js ShaderMaterial on a back-faced sphere; rays come from the
 //    Three.js camera and the shader writes gl_FragDepth so mesh mountains sit on it
-//  - land only inside six sector continents (uContinentDir/Rot/Color), which drift
+//  - land only inside six FIXED sector continents (uContinentDir/Rot/Color)
+//  - sea level uniform (uSeaLevel) replaces the constant water level; deep ocean floor with
+//    continental shelves and shallow land bridges between neighbours (uBridge crests);
+//    exposed seabed drawn as wet sand / salt flats, foam at the shore, ring at the normal shoreline
 //  - storm, eruption, flash, atmosphere colour are driven by market data in main.js
 //  - rings, moons and the planet's own spin removed (not data-driven)
 //  - tone mapping/gamma removed: Three.js OutputPass applies ACES + sRGB
@@ -46,10 +49,12 @@ uniform float uStorm, uEruption, uFlash, uStress;
 uniform vec3 uWaterDeep, uWaterSurface, uRockColor, uAccent;
 
 uniform vec3 uContinentDir[6];  // continent centres (unit vectors, world)
-uniform mat3 uContinentRot[6];  // world → continent-local rotation (terrain moves with drift)
+uniform mat3 uContinentRot[6];  // world → continent-local rotation
 uniform vec3 uContinentColor[6];
 uniform float uContinentCap;    // continent angular radius (radians)
 uniform vec3 uVentDir[2];       // volcano axes (unit vectors, world)
+uniform float uSeaLevel;        // current sea level in altitude units (0 = normal); falls with correlation
+uniform float uBridge[36];      // land-bridge crest altitude for neighbouring continents a*6+b (< -1: none)
 
 // Shader works in the original units: planet radius 2 at the origin.
 #define R_PLANET 2.0
@@ -115,6 +120,26 @@ int nearestContinent(vec3 n, out float bestDot) {
   return best;
 }
 
+// Shallow land bridge (ridge) along the great-circle arc between continent a and each
+// neighbour b. Crest altitude comes from uBridge (pair correlation); profile is parabolic
+// across the ridge with a meandering path. Returns the highest ridge at n (or -1).
+float bridgeHeight(vec3 n, int a) {
+  float best = -1.;
+  for(int b = 0; b < 6; b++) {
+    float crest = uBridge[a * 6 + b];
+    if(crest < -1.) continue;
+    vec3 A = uContinentDir[a], B = uContinentDir[b];
+    vec3 axis = normalize(cross(A, B));
+    if(dot(n, cross(axis, A)) < 0. || dot(n, cross(B, axis)) < 0.) continue; // outside the A–B arc
+    float pairSeed = float(min(a, b) * 7 + max(a, b));
+    float off = asin(clamp(dot(n, axis), -1., 1.)) + (noise(n * 11. + pairSeed) - .5) * .06;
+    float x = off / .075;
+    float h = crest - .01 * noise(n * 9. + pairSeed * 3.) - .09 * x * x;
+    best = max(best, h);
+  }
+  return best;
+}
+
 // Altitude in the original shader's units (land > SAND_LEVEL)
 float terrainAltitude(vec3 n, out int best) {
   float bd;
@@ -126,7 +151,11 @@ float terrainAltitude(vec3 n, out int best) {
   float mask = 1. - smoothstep(.8, 1.02, ang);
   float h = fbm(local * R_PLANET * uTerrainScale + seed, 6, .5, 2., 5.) * uNoiseStrength * 5.;
   float land = SAND_LEVEL + .008 + h * 1.25 * smoothstep(1.02, .55, ang); // flatter near the coast
-  return mix(-.03, land, mask);
+  // Ocean floor: deep, rising to a shallow continental shelf near the coast
+  float floorNoise = (noise(n * 7. + 2.) - .5) * .03;
+  float shelf = mix(-.15 + floorNoise, -.034, smoothstep(1.22, 1.0, ang));   // narrow shelf; deep ocean beyond
+  float ocean = max(shelf, bridgeHeight(n, best));
+  return mix(ocean, land, mask);
 }
 float planetNoise(vec3 p) { int b; return terrainAltitude(normalize(p), b) / 5.; }
 
@@ -257,11 +286,29 @@ Hit intersectPlanet(vec3 ro, vec3 rd) {
 
   vec3 tree = uContinentColor[best] * .35;                       // each sector its own colour
   vec3 rock = mix(uRockColor, uContinentColor[best] * .5, .35);
-  vec3 color = mix(uWaterDeep, uWaterSurface, smoothstep(WATER_SURFACE_LEVEL - .03, WATER_SURFACE_LEVEL + TRANSITION, altitude));
-  color = mix(color, SAND_COLOR, smoothstep(SAND_LEVEL, SAND_LEVEL + TRANSITION / 2., altitude));
-  color = mix(color, tree, smoothstep(TREE_LEVEL, TREE_LEVEL + TRANSITION, altitude));
-  color = mix(color, rock, smoothstep(ROCK_LEVEL, ROCK_LEVEL + TRANSITION, altitude));
-  color = mix(color, ICE_COLOR, smoothstep(ICE_LEVEL, ICE_LEVEL + TRANSITION, altitude));
+  // ── Sea level: water where the terrain is below uSeaLevel, coloured by depth
+  float depth = uSeaLevel - altitude;                                  // > 0 under water
+  vec3 color = mix(uWaterSurface, uWaterDeep, smoothstep(0., .09, depth));
+  float above = smoothstep(.0008, -.0008, depth);                      // 1 = above the current sea
+  float seabed = 1. - smoothstep(-.003, .003, altitude - WATER_SURFACE_LEVEL); // 1 = below the normal shoreline
+
+  // Exposed seabed: wet sand at the waterline drying to white salt flats (distinct from land)
+  float dryness = smoothstep(0., .03, -depth) * (.55 + .45 * noise(n * 34.));
+  vec3 flats = mix(vec3(.30, .26, .19), vec3(.80, .74, .6), dryness);       // wet sand → pale salt flats
+  color = mix(color, flats, above * seabed);
+
+  // Continents above the normal shoreline keep their normal colours
+  vec3 landCol = mix(SAND_COLOR, tree, smoothstep(TREE_LEVEL, TREE_LEVEL + TRANSITION, altitude));
+  landCol = mix(landCol, rock, smoothstep(ROCK_LEVEL, ROCK_LEVEL + TRANSITION, altitude));
+  landCol = mix(landCol, ICE_COLOR, smoothstep(ICE_LEVEL, ICE_LEVEL + TRANSITION, altitude));
+  color = mix(color, landCol, above * (1. - seabed));
+
+  // Foam line where the sea meets the shore, and a faint ring at the normal shoreline
+  float foam = (1. - smoothstep(0., .0035, abs(depth))) * (.55 + .45 * noise(n * 70. + uTime * .25));
+  color = mix(color, vec3(.95, .97, 1.), foam * .85);
+  float lowered = smoothstep(-.002, -.012, uSeaLevel);
+  float normalShore = (1. - smoothstep(0., .0025, abs(altitude - WATER_SURFACE_LEVEL))) * lowered * above;
+  color = mix(color, vec3(.7, .82, .95), normalShore * .35);
 
   // Clouds: density from VIX (uCloudsDensity), darker with storm
   vec3 cloudsCoord = (n * R_PLANET + vec3(uTime * .008 * uCloudsSpeed)) * uCloudsScale;
@@ -277,7 +324,7 @@ Hit intersectPlanet(vec3 ro, vec3 rd) {
   float coastGlow = 1. - smoothstep(.002, .012, abs(altitude - SAND_LEVEL));
   color += uAccent * coastGlow * uStress * .18;
 
-  float specular = 1. - smoothstep(SAND_LEVEL, SAND_LEVEL + TRANSITION, altitude);
+  float specular = 1. - above;                                     // only water reflects the sun
   return Hit(len, normal, Material(color, 1., specular * (1. - stormCover)));
 }
 

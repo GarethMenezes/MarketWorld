@@ -23,10 +23,14 @@ const CONFIG = {
   colorSensitivity: 20,
   glow: { base: 0.12, perMove: 1.4 },          // emissive = base + perMove * |t|
 
-  // Continental drift from average sector correlation (30-day window).
-  //   pull = (corr - corrLow) / (corrHigh - corrLow), clamped to [0, 1]
-  //   2017 ≈ 0.1 → spread out · Oct 2008 ≈ 0.77 · Mar 2020 ≈ 0.86 → supercontinent
-  drift: { corrLow: 0.25, corrHigh: 0.82, homeAngle: [0.85, 1.2], supercontinentAngle: 0.4 },
+  // Sea level from average sector correlation (30-day window). Continents stay fixed.
+  //   fall = (corr - corrLow) / (corrHigh - corrLow), clamped; level = normal + fall * (lowest - normal)
+  //   ≤ 0.3 → normal sea · ≥ 0.85 → lowest: every land bridge exposed, one landmass
+  //   2017 ≈ 0.13 · Oct 2008 ≈ 0.77 · Mar 2020 ≈ 0.86   (levels in shader altitude units)
+  sea: { corrLow: 0.3, corrHigh: 0.85, normal: 0, lowest: -0.065, seconds: 1.2 },
+  // Land-bridge crest per neighbouring pair from that pair's 60-day correlation (stretch goal):
+  //   crest = crestLow + rise * (crestHigh - crestLow), rise from pairCorr — always below normal sea
+  bridges: { corrLow: 0.2, corrHigh: 0.9, crestLow: -0.048, crestHigh: -0.018 },
 
   // Weather from VIX: storm = (vix - vixCalm) / vixRange, clamped to [0, 1]
   //   VIX 13 → clear blue sky · VIX 58+ → red sky, thick dark clouds
@@ -190,6 +194,8 @@ const planetUniforms = {
   uContinentRot: { value: Array.from({ length: 6 }, () => new THREE.Matrix3()) },
   uContinentColor: { value: Array.from({ length: 6 }, () => new THREE.Color()) },
   uContinentCap: { value: 0.45 },
+  uSeaLevel: { value: 0 },
+  uBridge: { value: new Float32Array(36).fill(-2) },
   uVentDir: { value: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)] },
 };
 const planet = new THREE.Mesh(new THREE.SphereGeometry(R * 1.85, 48, 32), new THREE.ShaderMaterial({
@@ -352,9 +358,15 @@ let tours = []; // filled in the GUIDED TOURS section; declared early so key han
 const N = data.dates.length;
 const stockIndex = Object.fromEntries(data.stocks.map((s) => [s.ticker, s]));
 
-// Continent placement: each sector sits on its own azimuth around a shared
-// "supercontinent" point. Drift only changes how far it is from that point.
-const qCenter = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.15);
+// Fixed continents (no drift) on the six directions of an octahedron, rotated so the default
+// view looks at the point between Technology, Financials and Energy. Each continent has four
+// neighbours joined by land bridges; opposite pairs have none:
+// Technology–Healthcare, Financials–Consumer, Energy–Industrials.
+const qTilt = new THREE.Quaternion().setFromUnitVectors(
+  new THREE.Vector3(1, 1, 1).normalize(), new THREE.Vector3(0, 3.2, 15).normalize());
+const PLATE_DIRS = [[0, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, -1], [-1, 0, 0], [0, -1, 0]]
+  .map((v) => new THREE.Vector3(...v).applyQuaternion(qTilt));
+const isNeighbour = (a, b) => a !== b && PLATE_DIRS[a].dot(PLATE_DIRS[b]) > -0.5;
 const continents = data.sectors.map((sector, i) => {
   const seed = i * 13.7 + 3.1;
   const tint = SECTOR_COLORS[sector.name] || '#88aa66';
@@ -368,11 +380,8 @@ const continents = data.sectors.map((sector, i) => {
   group.add(sectorLabel);
   land.userData.sector = sector.name;
   group.add(land);
+  group.quaternion.setFromUnitVectors(Z, PLATE_DIRS[i % 6]);
   world.add(group);
-
-  const azimuth = (i / data.sectors.length) * Math.PI * 2;
-  const qAz = qCenter.clone().multiply(new THREE.Quaternion().setFromAxisAngle(Z, azimuth));
-  const home = CONFIG.drift.homeAngle[i % 2];
 
   // Mountains: one per company, arranged on a small ring around the continent centre
   const mountains = sector.tickers.map((ticker, k) => {
@@ -398,7 +407,7 @@ const continents = data.sectors.map((sector, i) => {
     group.add(mesh);
     return mesh;
   });
-  return { sector, group, land, qAz, home, mountains, sectorLabel };
+  return { sector, group, land, mountains, sectorLabel };
 });
 const allMountains = continents.flatMap((c) => c.mountains);
 const pickables = [...allMountains, ...continents.map((c) => c.land)];
@@ -418,13 +427,22 @@ function colorFromReturn(ret, out) {
   return t < 0 ? out.copy(YELLOW).lerp(RED, -t) : out.copy(YELLOW).lerp(GREEN, t);
 }
 const stormFromVix = (vix) => clamp01((vix - CONFIG.storm.vixCalm) / CONFIG.storm.vixRange);
-const driftFromCorr = (c) => clamp01((c - CONFIG.drift.corrLow) / (CONFIG.drift.corrHigh - CONFIG.drift.corrLow));
+const seaFromCorr = (c) => CONFIG.sea.normal +
+  clamp01((c - CONFIG.sea.corrLow) / (CONFIG.sea.corrHigh - CONFIG.sea.corrLow)) * (CONFIG.sea.lowest - CONFIG.sea.normal);
+const crestFromCorr = (c) => { const b = CONFIG.bridges;
+  return b.crestLow + clamp01((c - b.corrLow) / (b.corrHigh - b.corrLow)) * (b.crestHigh - b.crestLow); };
+const SECTOR_NAMES = data.sectors.map((x) => x.name);
+function pairCorrAt(a, b, i) {
+  const pc = data.market.pairCorr || {};
+  const arr = pc[`${SECTOR_NAMES[a]}|${SECTOR_NAMES[b]}`] || pc[`${SECTOR_NAMES[b]}|${SECTOR_NAMES[a]}`];
+  return arr ? arr[i] : null;
+}
 
 // Smoothed world state (follows the data targets)
 const state = {
   week: 0, playing: false, acc: 0,
   storm: 0, targetStorm: 0,
-  drift: 0, targetDrift: 0,
+  sea: 0, targetSea: 0, bridgeTarget: new Float32Array(36).fill(-2),
   quake: 0, flash: 0, vix: 15,
   eruption: 0, targetEruption: 0, vents: [0, 1],
   selected: null,
@@ -437,7 +455,13 @@ function setWeek(i, { quake = true } = {}) {
   state.week = i;
   const m = data.market;
   if (m.vix[i] != null) { state.vix = m.vix[i]; state.targetStorm = stormFromVix(m.vix[i]); }
-  if (m.avgCorr[i] != null) state.targetDrift = driftFromCorr(m.avgCorr[i]);
+  if (m.avgCorr[i] != null) state.targetSea = seaFromCorr(m.avgCorr[i]);
+  for (let a = 0; a < 6; a++) for (let b = 0; b < 6; b++) {
+    if (!isNeighbour(a, b)) continue;
+    const c = pairCorrAt(a, b, i);
+    if (c != null) state.bridgeTarget[a * 6 + b] = crestFromCorr(c);
+    else if (state.bridgeTarget[a * 6 + b] < -1) state.bridgeTarget[a * 6 + b] = CONFIG.bridges.crestLow;
+  }
   if (quake && i !== prev && m.ret[i] != null && m.ret[i] < CONFIG.quakeRet) {
     state.quake = Math.max(state.quake, Math.min(1, m.ret[i] / -0.15));
   }
@@ -502,10 +526,10 @@ function vixLabel(v) {
 }
 function corrLabel(c) {
   if (c == null) return '';
-  if (c < 0.35) return 'moving independently';
-  if (c < 0.6) return 'loosely linked';
-  if (c < 0.75) return 'drifting together';
-  return 'supercontinent';
+  if (c <= CONFIG.sea.corrLow) return 'normal';
+  if (c < 0.6) return 'falling';
+  if (c < CONFIG.sea.corrHigh) return 'low · bridges emerging';
+  return 'lowest · one landmass';
 }
 
 // Card headline and phase come straight from the numbers (no invented narrative)
@@ -513,7 +537,7 @@ function weekStory(i) {
   const m = data.market, v = m.vix[i], c = m.avgCorr[i], r = m.ret[i];
   if (r != null && r < CONFIG.quakeRet) return { phase: 'Crash week', risk: true, world: 'The erupting world', headline: 'The ground gives way.' };
   if (v != null && v >= 40) return { phase: 'Panic', risk: true, world: 'The storm world', headline: 'Fear everywhere.' };
-  if (c != null && c > 0.75) return { phase: 'Everything moves together', risk: true, world: 'The supercontinent', headline: 'No place to hide.' };
+  if (c != null && c > 0.75) return { phase: 'Everything moves together', risk: true, world: 'The low-tide world', headline: 'No place to hide.' };
   if (v != null && v >= 25) return { phase: 'Stressed', risk: true, world: 'The restless world', headline: 'Clouds gathering.' };
   if (c != null && c < 0.35) return { phase: 'Calm', risk: false, world: 'The open world', headline: 'Every sector on its own path.' };
   return { phase: 'Normal', risk: false, world: 'The steady world', headline: 'Business as usual.' };
@@ -534,12 +558,12 @@ function updateStatsPanel() {
   $('weather').classList.toggle('risk', story.risk);
   markTick(i);
   $('vix').textContent = m.vix[i] == null ? '—' : `${m.vix[i].toFixed(1)} · ${vixLabel(m.vix[i])}`;
-  $('corr').textContent = m.avgCorr[i] == null ? '—' : `${m.avgCorr[i].toFixed(2)} · ${corrLabel(m.avgCorr[i])}`;
+  $('corr').textContent = m.avgCorr[i] == null ? '—' : `${corrLabel(m.avgCorr[i])} · corr ${m.avgCorr[i].toFixed(2)}`;
   $('mret').innerHTML = `<span class="${cls(m.ret[i])}">${pct(m.ret[i])}</span>`;
   const notes = [];
   if (m.ret[i] != null && m.ret[i] < CONFIG.quakeRet) notes.push('Earthquake: crash week');
   if (m.vix[i] != null && m.vix[i] > CONFIG.lightningVix) notes.push('Lightning: extreme fear');
-  if (m.avgCorr[i] != null && m.avgCorr[i] > 0.75) notes.push('Diversification failing: sectors fall together');
+  if (m.avgCorr[i] != null && m.avgCorr[i] > 0.75) notes.push('Low tide: sectors fall together, diversification failing');
   $('mood').textContent = notes.join(' · ');
 }
 
@@ -642,14 +666,12 @@ const AXIS_X = new THREE.Vector3(1, 0, 0);
 const tourQ = new THREE.Quaternion(), tmpV = new THREE.Vector3();
 const fly = { active: false, t: 0, fromDir: new THREE.Vector3(), toDir: new THREE.Vector3(), fromDist: 0, toDist: 0 };
 
-// Where a focus sits on the planet once drift reaches this week's target
+// Where a focus sits on the planet (continents are fixed)
 function focusDirection(focus, out) {
   const sectorName = stockIndex[focus]?.sector ?? focus;
-  const c = continents.find((x) => x.sector.name === sectorName);
-  if (!c) return out.copy(Z).applyQuaternion(qCenter); // "market": the supercontinent point
-  const angle = c.home + (CONFIG.drift.supercontinentAngle - c.home) * state.targetDrift;
-  tourQ.multiplyQuaternions(c.qAz, tourQ.setFromAxisAngle(AXIS_X, angle));
-  return out.copy(Z).applyQuaternion(tourQ);
+  const k = SECTOR_NAMES.indexOf(sectorName);
+  if (k === -1) return out.set(0, 3.2, 15).normalize(); // "market": the default overview
+  return out.copy(PLATE_DIRS[k]);
 }
 
 function startFly(dir, dist) {
@@ -804,12 +826,14 @@ function animate() {
     }
   }
 
-  // Continental drift: correlation pulls every continent toward the supercontinent point
-  state.drift += (state.targetDrift - state.drift) * k * 0.6;
-  for (const c of continents) {
-    const angle = c.home + (CONFIG.drift.supercontinentAngle - c.home) * state.drift;
-    tmpQ.setFromAxisAngle(X, angle);
-    c.group.quaternion.multiplyQuaternions(c.qAz, tmpQ);
+  // Sea level (average correlation) and land-bridge crests (pair correlation), eased smoothly
+  const ks = 1 - Math.exp(-dt / CONFIG.sea.seconds * 3);
+  state.sea += (state.targetSea - state.sea) * ks;
+  planetUniforms.uSeaLevel.value = state.sea;
+  const bridges = planetUniforms.uBridge.value;
+  for (let q = 0; q < 36; q++) {
+    const tgt = state.bridgeTarget[q];
+    bridges[q] = tgt < -1 ? -2 : bridges[q] < -1 ? tgt : bridges[q] + (tgt - bridges[q]) * ks;
   }
 
   // Mountains: height = growth, colour = weekly return
@@ -842,7 +866,7 @@ function animate() {
   pu.uAmbientLight.value = 0.055 + 0.025 * s;
   sun.intensity = 2.4 - 1.1 * s;
 
-  // Continents for the shader: centre direction + world→local rotation (terrain drifts with them)
+  // Continents for the shader: centre direction + world→local rotation (fixed)
   pu.uPlanetPosition.value.copy(world.position);
   for (let c = 0; c < continents.length; c++) {
     const q = continents[c].group.quaternion;
@@ -893,7 +917,8 @@ function weekFromUrl() {
 const start = weekFromUrl() ?? data.dates.findIndex((d) => d >= '2007-06-29');
 setWeek(start, { quake: false });
 // Jump straight to the starting state (no slow fade-in on load)
-state.storm = state.targetStorm; state.drift = state.targetDrift;
+state.storm = state.targetStorm; state.sea = state.targetSea;
+planetUniforms.uBridge.value.set(state.bridgeTarget);
 for (const m of allMountains) {
   const u = m.userData; u.height = u.targetHeight; u.color.copy(u.targetColor); u.glow = u.targetGlow;
 }
