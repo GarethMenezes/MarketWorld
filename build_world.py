@@ -40,6 +40,8 @@ RAW = ROOT / "data" / "raw.pkl"
 OUT = ROOT / "public" / "world.json"
 STRESS_OUT = ROOT / "public" / "stress.json"
 CALM_VIX, CRISIS_VIX = 20, 30   # stress-test regimes: calm = VIX < 20, crisis = VIX > 30
+MARKET_SHOCK, SECTOR_SHOCK = -0.04, -0.07   # meteor strikes: daily falls at or below these
+MAX_SHOCKS_PER_WEEK = 3
 
 
 def download():
@@ -140,9 +142,48 @@ def build(close, volume):
         "sectors": sectors,
         "stocks": stocks,
         "market": market,
+        "shocks": build_shocks(daily_ret[all_stocks].mean(axis=1), sec, dates),
     }
     vix_daily = close[VIX] if VIX in close else pd.Series(np.nan, index=close.index)
     return world, build_stress(sec, vix_daily)
+
+
+def build_shocks(mkt_daily, sec, dates):
+    """Meteor strikes: single days with extreme drops.
+
+    market shock: average daily return of all stocks <= MARKET_SHOCK
+    sector shock: a sector's daily return <= SECTOR_SHOCK on a day that is not a market shock
+    week = index of the W-FRI week containing the day; sector = the sector that fell most that day.
+    At most MAX_SHOCKS_PER_WEEK per week (the biggest falls).
+    """
+    week_of = {d.strftime("%Y-%m-%d"): i for i, d in enumerate(dates)}
+    found = []
+    for day, mret in mkt_daily.dropna().items():
+        row = sec.loc[day].dropna()
+        if row.empty:
+            continue
+        week_end = (day + pd.offsets.Week(weekday=4, n=0)).strftime("%Y-%m-%d")  # same day if Friday
+        if week_end not in week_of:
+            continue
+        if mret <= MARKET_SHOCK:
+            found.append({"date": day.strftime("%Y-%m-%d"), "week": week_of[week_end], "kind": "market",
+                          "ret": round(float(mret), 4), "sector": row.idxmin()})
+        else:
+            for name, r in row.items():
+                if r <= SECTOR_SHOCK:
+                    found.append({"date": day.strftime("%Y-%m-%d"), "week": week_of[week_end], "kind": "sector",
+                                  "ret": round(float(r), 4), "sector": name})
+    by_week = {}
+    for sh in found:
+        by_week.setdefault(sh["week"], []).append(sh)
+    shocks = []
+    for w in sorted(by_week):
+        shocks += sorted(by_week[w], key=lambda x: x["ret"])[:MAX_SHOCKS_PER_WEEK]
+    years = pd.Series([s["date"][:4] for s in shocks]).value_counts().sort_index()
+    print(f"Shock days: {len(shocks)} kept ({len(found)} found; "
+          f"{sum(s['kind'] == 'market' for s in shocks)} market, {sum(s['kind'] == 'sector' for s in shocks)} sector)")
+    print("  by year: " + ", ".join(f"{y}:{n}" for y, n in years.items()))
+    return shocks
 
 
 def build_stress(sec, vix_daily):

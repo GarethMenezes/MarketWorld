@@ -10,6 +10,7 @@ import planetFragment from './shaders/planet.frag.glsl?raw';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { createSandbox } from './sandbox.js';
 import { createAsk } from './ask.js';
+import { createMeteors } from './meteors.js';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
 // Tuned on real data 2007–2026 (see check_world.py output).
@@ -415,7 +416,7 @@ const continents = data.sectors.map((sector, i) => {
   return { sector, group, land, mountains, sectorLabel };
 });
 const allMountains = continents.flatMap((c) => c.mountains);
-const pickables = [...allMountains, ...continents.map((c) => c.land)];
+const pickables = [...allMountains, ...continents.map((c) => c.land)]; // craters are added below
 
 // ───────────────────────────── MAPPINGS (data → visual targets) ─────────────────────────────
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
@@ -440,6 +441,15 @@ function pairCorrAt(a, b, i) {
   const arr = pc[`${SECTOR_NAMES[a]}|${SECTOR_NAMES[b]}`] || pc[`${SECTOR_NAMES[b]}|${SECTOR_NAMES[a]}`];
   return arr ? arr[i] : null;
 }
+
+// Meteor strikes for shock days (world.json "shocks"); sound hooks are attached later
+const meteorHooks = { launch: null, impact: null };
+const meteors = createMeteors({
+  world, R, plateDirs: PLATE_DIRS, sectorNames: SECTOR_NAMES, shocks: data.shocks || [],
+  onLaunch: (size) => meteorHooks.launch?.(size), onImpact: (size) => meteorHooks.impact?.(size),
+});
+
+pickables.unshift(...meteors.craters);
 
 // Smoothed world state (follows the data targets)
 const state = {
@@ -482,6 +492,8 @@ function setWeek(i, { quake = true } = {}) {
       u.targetGlow = CONFIG.glow.base + CONFIG.glow.perMove * Math.min(1, Math.abs(r * CONFIG.colorSensitivity));
     }
   }
+  // Meteors only animate on single forward steps of playback; jumps just show the craters
+  meteors.onWeek(i, state.playing && i === prev + 1);
   updateStatsPanel();
   updateInfoPanel();
   if (i !== prev) requestExplanation();
@@ -573,6 +585,19 @@ function updateInfoPanel() {
   if (!sel) { $('info').style.display = 'none'; return; }
   const i = state.week;
   $('info').style.display = 'block';
+  if (sel.crater) {                       // meteor crater: the shock day
+    const c = sel.crater;
+    $('infoTitle').textContent = 'Meteor strike';
+    $('infoSub').textContent = c.kind === 'market'
+      ? `${fmtDate(c.date)} · whole market ${pct(c.ret)} · ${c.sector} hit hardest`
+      : `${fmtDate(c.date)} · ${c.sector} ${pct(c.ret)}`;
+    $('infoRows').innerHTML =
+      row('Day', fmtDate(c.date)) +
+      row(c.kind === 'market' ? 'Whole market that day' : `${c.sector} that day`, `<span class="down">${pct(c.ret)}</span>`) +
+      row('Hardest-hit sector', c.sector) +
+      row('Type', c.kind === 'market' ? 'Market-wide shock (≤ −4%)' : 'Sector shock (≤ −7%)');
+    return;
+  }
   if (sel.ticker) {
     const s = stockIndex[sel.ticker];
     $('infoTitle').textContent = `${COMPANY[sel.ticker] ?? sel.ticker}`;
@@ -607,7 +632,7 @@ function requestExplanation() {
   clearTimeout(explainTimer);
   const sel = state.selected;
   if (!sel) return;
-  if (state.playing) { ai.innerHTML = ''; return; } // don't spam the backend during playback
+  if (sel.crater || state.playing) { ai.innerHTML = ''; return; } // no AI for craters; no spam during playback
   const seq = ++explainSeq, week = state.week;
   ai.innerHTML = `<span class="label">Explorer's log</span><div>Thinking…</div>`;
   explainTimer = setTimeout(async () => {
@@ -778,9 +803,12 @@ canvas.addEventListener('pointerup', (e) => {
   const rect = canvas.getBoundingClientRect();
   pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects(pickables, false).find((h) => h.object.visible);
+  const hits = raycaster.intersectObjects(pickables, false).filter((h) => h.object.visible);
+  // Craters lie flat on the surface, under the (invisible) continent pick mesh: let them win
+  const hit = hits.find((h) => h.object.userData.crater) ?? hits[0];
   if (!hit) return;
   const u = hit.object.userData;
+  if (u.crater) { select({ crater: u.crater }); return; }
   select(u.ticker ? { ticker: u.ticker, sector: u.sector } : { ticker: null, sector: u.sector });
 });
 
@@ -949,6 +977,7 @@ function animate() {
     state.quake *= Math.exp(-dt * 1.6);
   } else if (state.quake > 0) { state.quake = 0; world.position.set(0, 0, 0); }
 
+  meteors.update(dt);
   updateFly(dt);
   controls.update(dt);
   updateLabels();
