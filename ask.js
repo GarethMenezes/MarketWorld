@@ -54,6 +54,8 @@ const INTENTS = [
   ['fear', /fear|scar(y|ed|iest)|afraid|panic(ky)?|\bvix\b|volatil|turbulen|stress/],
   ['calm', /calm|quiet|stable|boring|peaceful|least volatile/],
   ['together', /together|connected|correlat|in sync|lockstep|diversif/],
+  ['bestYear', /best (calendar )?year|strongest year|(year|years) .*(grew|rose|gained) (the )?most/],
+  ['worstYear', /worst (calendar )?year|weakest year|(year|years) .*(fell|lost) (the )?most/],
   ['best', /best|boom|rally|recover|surge|soar|rise|rose|gain|jump|up the most|bull/],
   ['worst', /crash|worst|fall|fell|drop|plunge|collapse|tank|slump|sell-?off|bad|down the most|lost/],
 ];
@@ -67,7 +69,7 @@ const f = (v, n) => (v == null ? 'n/a' : v.toFixed(n));
 export function suggestions(data) {
   const top = [...data.stocks].sort((a, b) => (b.growth.at(-1) ?? 0) - (a.growth.at(-1) ?? 0))[0];
   const name = top?.name ?? top?.ticker ?? 'Apple';
-  return ['When did banks crash?', 'Show me the COVID crash', `Best week for ${name}`, 'What happened in 2016?',
+  return ['When did banks crash?', 'Show me the COVID crash', `Best year for ${name}`, 'What happened in 2016?',
     'When was fear highest?', 'Which company grew the most?', 'Calmest week in 2017', 'Brexit'];
 }
 
@@ -135,6 +137,17 @@ export function localAnswer(question, data) {
   const where = event && !year ? ` during ${event.name}` : year ? ` in ${monthName}${year}` : month ? ` in ${monthName.trim()}` : '';
   const facts = (i) => ` ${subject[0].toUpperCase()}${subject.slice(1)} moved ${p(own[i])} that week; the whole market moved ${p(m.ret[i])} with ${fear} ${f(m.vix[i], 0)} and sector correlation ${f(m.avgCorr[i], 2)}.`;
   const done = (i, lead) => ({ weekIndex: i, date: d[i], focus, answer: lead + facts(i), source: 'fallback' });
+  // Big weekly gains usually come in the middle of crises, as prices bounce from deep falls: say so
+  const reboundNote = (i) => {
+    if (m.vix[i] == null || m.vix[i] < 30) return '';
+    let note = ' This was a rebound in the middle of a crisis: the biggest weekly gains usually come when fear is highest and prices have already fallen a long way.';
+    if (stock) {
+      const peak = Math.max(...stock.growth.slice(0, i).filter((g) => g != null));
+      const below = 1 - stock.growth[i] / peak;
+      if (below > 0.15) note += ` Even after this week, ${stock.name ?? focus} was still ${Math.round(below * 100)}% below its earlier peak.`;
+    }
+    return note;
+  };
 
   // 1. An exact date
   if (exact) {                                   // the week (ending Friday) that contains that day
@@ -154,6 +167,19 @@ export function localAnswer(question, data) {
     return { weekIndex: i, date: d[i], focus, source: 'fallback',
       answer: `${s.name ?? s.ticker} (${s.sector}) grew the ${kind === 'growthMax' ? 'most' : 'least'}${sector ? ` in ${sector.name}` : ''}: ×${s.growth[i].toFixed(1)} from 2007 to ${d[i]}${s.growth[i] < 1 ? ', a fall' : ''}.` };
   }
+  // 4a. Best / worst calendar year: compound the weekly returns within each year
+  if (kind === 'bestYear' || kind === 'worstYear') {
+    const years = {};
+    own.forEach((v, i) => { if (v != null) { const y = d[i].slice(0, 4); years[y] = (years[y] ?? 1) * (1 + v); } });
+    const full = Object.entries(years).filter(([y]) => y > d[0].slice(0, 4) || d[0].endsWith('-01-05'));
+    if (!full.length) return help('I found no yearly data for that.');
+    const [y, g] = full.reduce((a, b) => ((kind === 'bestYear' ? b[1] > a[1] : b[1] < a[1]) ? b : a));
+    const i = Math.max(...d.map((x, k) => (x.startsWith(y) ? k : -1)));
+    // No single-week facts here: they would distract from the whole-year figure
+    return { weekIndex: i, date: d[i], focus, source: 'fallback',
+      answer: `The ${kind === 'bestYear' ? 'best' : 'worst'} calendar year for ${subject} was ${y}: ${p(g - 1)} over the year.`
+        + `${y === d.at(-1).slice(0, 4) ? ' (This year is not finished yet.)' : ''} The planet now shows the last week of ${y}.` };
+  }
   // 4. A question type (or the default one for a named event)
   if (!kind && event) kind = event.kind;
   const pick = (series, best) => {
@@ -170,7 +196,7 @@ export function localAnswer(question, data) {
       fear: `Fear peaked${where} in the week of ${d[i]} (${fear} ${f(m.vix[i], 0)}).`,
       calm: `The calmest week${where} was ${d[i]} (${fear} ${f(m.vix[i], 0)}).`,
       together: `Sectors moved most closely together${where} in the week of ${d[i]} (correlation ${f(m.avgCorr[i], 2)}).`,
-      best: `The best week for ${subject}${where} was ${d[i]}.`,
+      best: `The best week for ${subject}${where} was ${d[i]}.${reboundNote(i)}`,
       worst: `The worst week for ${subject}${where} was ${d[i]}.`,
     }[kind];
     return done(i, lead);

@@ -65,3 +65,18 @@ test('companies not on the planet and unmatched questions get help, not a dead e
   assert.equal(r.help, true);
   assert.equal(r.weekIndex, null);
 });
+
+test('best week inside a crisis explains the rebound and the distance from the peak', () => {
+  const r = localAnswer('Best week for NVIDIA', us);
+  assert.equal(r.date, '2008-10-31');
+  assert.match(r.answer, /rebound in the middle of a crisis/);
+  assert.match(r.answer, /below its earlier peak/);
+});
+
+test('best and worst calendar years', () => {
+  const best = localAnswer('Best year for NVIDIA', us);
+  assert.equal(best.focus, 'NVDA');
+  assert.ok(best.date.startsWith('2023'));
+  assert.match(best.answer, /best calendar year for NVIDIA was 2023/);
+  assert.ok(localAnswer('worst year for the market', us).date.startsWith('2008'));
+});
