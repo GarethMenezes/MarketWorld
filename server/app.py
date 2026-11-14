@@ -48,11 +48,12 @@ def fear_label(vix):
             else "stressed" if vix < 40 else "crisis level")
 
 
-def gather(ticker, sector, week):
+def gather(ticker, sector, week, event=None):
     """Collect the facts for this week from world.json. Returns (subject, facts dict)."""
     week = max(0, min(len(DATES) - 1, week))
     facts = {
         "week_ending": DATES[week],
+        **({"known_as": event} if event else {}),
         "market_weekly_return": pct(MARKET["ret"][week]),
         "vix": MARKET["vix"][week],
         "vix_mood": fear_label(MARKET["vix"][week]),
@@ -107,7 +108,7 @@ def template(subject, f):
 # ───────────── LLM (swap provider here) ─────────────
 PROMPT = """You are a guide on a planet built from stock market data. In 3 short sentences, explain what was happening to {subject} in the week ending {date}, using ONLY these numbers:
 {numbers}
-Relate it to the wider market mood (VIX = market fear, average sector correlation = how much sectors move together). If the numbers don't show why it moved, say so. Do not invent news or events. Never give investment advice."""
+If "known_as" is given, that is what the week is remembered for; you may name it but add no other facts. Relate it to the wider market mood (VIX = market fear, average sector correlation = how much sectors move together). If the numbers don't show why it moved, say so. Do not invent news or events. Never give investment advice."""
 
 
 def call_llm(prompt: str) -> str:
@@ -132,11 +133,12 @@ def call_llm(prompt: str) -> str:
     return text
 
 
-def explain(ticker, sector, week):
-    key = (ticker, sector, week)
+def explain(ticker, sector, week, event=None):
+    """event: optional name of the week (tours only, written by us, never by the client)."""
+    key = (ticker, sector, week, event)
     if key in _cache:
         return _cache[key]
-    subject, facts = gather(ticker, sector, week)
+    subject, facts = gather(ticker, sector, week, event)
     fallback = template(subject, facts)
     result = {"text": fallback, "source": "template", "facts": facts}
     if os.environ.get("ANTHROPIC_API_KEY"):

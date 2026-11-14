@@ -1,0 +1,58 @@
+[
+  {
+    "date": "2008-09-19",
+    "title": "Lehman Brothers collapses",
+    "focus": "Financials",
+    "narration": "In the week of 2008-09-19, the Financials sector fell 0.3%, while the whole market moved -0.2%. Market fear was stressed (VIX 32). Sectors were partly moving together.",
+    "narrationSource": "template"
+  },
+  {
+    "date": "2008-10-10",
+    "title": "The worst week of 2008",
+    "focus": "market",
+    "narration": "In the week of 2008-10-10, the market fell 19.9%. Market fear was crisis level (VIX 70). Sectors were moving almost in lockstep, so diversification offered little shelter.",
+    "narrationSource": "template"
+  },
+  {
+    "date": "2011-08-12",
+    "title": "US credit rating downgraded",
+    "focus": "market",
+    "narration": "In the week of 2011-08-12, the market fell 2.3%. Market fear was stressed (VIX 36). Sectors were moving almost in lockstep, so diversification offered little shelter.",
+    "narrationSource": "template"
+  },
+  {
+    "date": "2015-08-21",
+    "title": "China devaluation sell-off",
+    "focus": "market",
+    "narration": "In the week of 2015-08-21, the market fell 6.6%. Market fear was nervous (VIX 28). Sectors were partly moving together.",
+    "narrationSource": "template"
+  },
+  {
+    "date": "2018-02-09",
+    "title": "Volatility spike",
+    "focus": "market",
+    "narration": "In the week of 2018-02-09, the market fell 5.9%. Market fear was nervous (VIX 29). Sectors were moving almost in lockstep, so diversification offered little shelter.",
+    "narrationSource": "template"
+  },
+  {
+    "date": "2020-03-20",
+    "title": "COVID-19 crash",
+    "focus": "market",
+    "narration": "In the week of 2020-03-20, the market fell 14.9%. Market fear was crisis level (VIX 66). Sectors were moving almost in lockstep, so diversification offered little shelter.",
+    "narrationSource": "template"
+  },
+  {
+    "date": "2022-06-17",
+    "title": "Rate-hike bear market",
+    "focus": "market",
+    "narration": "In the week of 2022-06-17, the market fell 5.9%. Market fear was stressed (VIX 31). Sectors were partly moving together.",
+    "narrationSource": "template"
+  },
+  {
+    "date": "2023-05-26",
+    "title": "The AI boom lifts tech",
+    "focus": "NVDA",
+    "narration": "In the week of 2023-05-26, NVDA rose 24.6%, while the whole market moved +0.3%. Market fear was normal (VIX 18). Sectors were moving fairly independently.",
+    "narrationSource": "template"
+  }
+]

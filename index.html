@@ -49,6 +49,16 @@
       border: 1px solid var(--border); white-space: nowrap; }
     .up { color: var(--up); } .down { color: var(--down); }
     #keys { color: var(--muted); font-size: 11px; margin-top: 6px; }
+    #tourBtn { flex: none; height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border);
+      background: #1d2b50; color: var(--text); cursor: pointer; font: inherit; }
+    #tour { left: 50%; transform: translateX(-50%); bottom: 92px; width: min(560px, calc(100% - 32px)); display: none; }
+    #tour .step { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
+    #tour h2 { margin: 2px 0 0; font-size: 20px; }
+    #tourText { margin: 8px 0; font-size: 14px; }
+    #tour .label { color: var(--muted); font-size: 11px; }
+    #tour .nav { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+    #tour .nav button { background: #18233f; color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+      padding: 5px 12px; cursor: pointer; font: inherit; }
     @media (max-width: 760px) {
       #legend, #disclaimer { display: none; }
       #stats { width: auto; right: 16px; }
@@ -84,7 +94,20 @@
     <div><b>Sky &amp; clouds</b> = market fear (VIX) · lightning above 40</div>
     <div><b>Earthquake</b> = market fell more than 7% in a week</div>
     <div><b>Continental drift</b> = sectors moving together (correlation)</div>
-    <div id="keys">Space play · ←/→ week · Shift+←/→ year · click a mountain</div>
+    <div id="keys">Space play · ←/→ week · Shift+←/→ year · click a mountain · 1–8 tour stops · Esc exit</div>
+  </div>
+
+  <div id="tour" class="panel">
+    <div class="step" id="tourStep"></div>
+    <h2 id="tourTitle"></h2>
+    <div class="sub" id="tourDate"></div>
+    <div id="tourText"></div>
+    <div class="label" id="tourLabel"></div>
+    <div class="nav">
+      <button id="tourPrev">◀ Prev</button>
+      <button id="tourNext">Next ▶</button>
+      <button id="tourExit">Exit tour</button>
+    </div>
   </div>
 
   <div id="disclaimer">For exploration and education — not financial advice</div>
@@ -93,6 +116,7 @@
     <button id="play" aria-label="Play">▶</button>
     <input id="slider" type="range" min="0" max="0" value="0" />
     <span id="sliderDate"></span>
+    <button id="tourBtn">Take the tour</button>
   </div>
 
   <script type="module" src="/main.js"></script>
