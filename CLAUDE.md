@@ -19,9 +19,11 @@ Every visual must map to a real number. No data-free effects except pure atmosph
 | Volatility | (available: per-continent storms if time) | `stocks[].vol`, `sectors[].vol` |
 | Market fear (VIX) | Sky, atmosphere blue→red, cloud cover/darkness, lightning | `market.vix` |
 | Crash week | Earthquake when average weekly return < -7% | `market.ret` |
-| Sector correlation | Continental drift into a supercontinent | `market.avgCorr` |
+| Sector-pair correlation (60-day) | Fault line on that pair's plate border: faint crack → orange lava | `market.pairCorr["A\|B"]` |
+| Average correlation (30-day) | Crisis cracks branching across every plate | `market.avgCorr` |
+| Trading volume vs normal | Night-side city lights per sector | `stocks[].relVolume` |
 
-Key insight for judges: in calm markets sectors move independently (continents spread out); in a crisis everything falls together (correlation → 1, continents collide). Diversification fails exactly when you need it.
+Key insight for judges: in calm markets sectors move independently (faint cracks); in a crisis everything falls together (correlation → 1, every border glows and the planet cracks). Diversification fails exactly when you need it.
 
 Not a trading tool — the UI says "For exploration and education — not financial advice".
 
@@ -99,3 +101,12 @@ Calm week → play from 2007, sky reddens → pause at `?week=2008-10-10` (super
 - Performance measured on Intel Arc iGPU: 8.6 ms/frame at pixel ratio 1.5. Low fps seen through browser automation is rAF throttling, not GPU cost.
 - On laptops with a dGPU, set Chrome to "High performance" in Windows Graphics settings.
 - Lehman week (2008-09-19): Financials' weekly return is only -0.3% (Friday rescue rally) — the story is VIX + correlation rising, say so in the demo.
+
+## 9. Visual model (since 14 Nov evening)
+
+- Continents are FIXED plates (octahedron, `PLATE_DIRS` in main.js); no drift. Opposite pairs share no
+  border: Technology–Healthcare, Financials–Consumer, Energy–Industrials (still in pairCorr data).
+- Stocks: mountain (height = growth) + small glowing summit marker (colour/brightness = weekly return).
+  Labels: hover, plus the week's 3 biggest gainers and 3 biggest losers; greedy no-overlap placement.
+- Natural land palette; sector colour is a subtle tint (`uTint`, brighter on hover).
+- Tunables: `CONFIG.faults`, `CONFIG.cities` in main.js.

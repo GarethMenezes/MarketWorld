@@ -42,7 +42,7 @@
     /* Labels in 3D (CSS2DRenderer) */
     .label-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
     .tk { font: 600 10px ui-monospace, Consolas, monospace; color: #fff; text-shadow: 0 0 3px #000, 0 0 6px #000; letter-spacing: .5px; white-space: nowrap; transform: translateY(-8px); }
-    .tk.dim { opacity: .55; }
+    .tk.up { color: #8ff0a8; } .tk.down { color: #ff9b8a; }
     .sec { font: 11px/1 -apple-system, "Segoe UI", sans-serif; letter-spacing: 3px; text-transform: uppercase; color: #fff;
       text-shadow: 0 0 4px #000, 0 0 10px #000; white-space: nowrap; opacity: .85; }
 
@@ -51,7 +51,8 @@
     .card { padding: 20px 0; border-bottom: 1px solid var(--line); }
     .meta { display: flex; gap: 10px; color: var(--muted); }
     .meta .date { color: var(--text); }
-    .phase { display: inline-block; margin: 12px 0 8px; color: var(--accent); }
+    .phase { color: var(--accent); }
+    #week h2 { margin-top: 10px; }
     .phase.risk { color: var(--red); }
     h2 { font-size: 24px; font-weight: 400; letter-spacing: -.6px; line-height: 1.15; margin: 0 0 10px; }
     .row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
@@ -128,27 +129,24 @@
     </section>
 
     <aside class="story" id="story">
-      <article id="tour" class="card" aria-live="polite">
-        <button class="close" id="tourExit" aria-label="Exit tour">×</button>
-        <div class="meta mono"><span id="tourNum">01</span><span class="date" id="tourDate"></span><span id="tourStep"></span></div>
-        <div class="phase mono" id="tourPhase"></div>
-        <h2 id="tourTitle"></h2>
-        <p class="summary" id="tourSummary"></p>
-        <span class="ai-label mono" id="tourLabel"></span>
-        <p id="tourText"></p>
-        <div id="tourOutcomes"></div>
-        <div class="source mono" id="tourSource"></div>
-        <div class="nav"><button id="tourPrev">← Prev</button><button id="tourNext">Next →</button></div>
-      </article>
-
       <article id="week" class="card">
-        <div class="meta mono"><span class="date" id="date">—</span></div>
-        <div class="phase mono" id="phase">—</div>
+        <div class="meta mono"><span class="date" id="date">—</span><span class="phase" id="phase">—</span></div>
         <h2 id="headline">—</h2>
         <div class="row"><span class="k">Fear (VIX)</span><span class="v" id="vix">—</span></div>
         <div class="row"><span class="k">Sector correlation</span><span class="v" id="corr">—</span></div>
         <div class="row"><span class="k">Market</span><span class="v" id="mret">—</span></div>
         <div id="mood" class="mono"></div>
+      </article>
+
+      <article id="tour" class="card" aria-live="polite">
+        <button class="close" id="tourExit" aria-label="Exit tour">×</button>
+        <div class="meta mono"><span id="tourNum">01</span><span class="date" id="tourDate"></span><span id="tourStep"></span></div>
+        <p class="summary" id="tourSummary" style="margin-top:10px"></p>
+        <span class="ai-label mono" id="tourLabel"></span>
+        <p id="tourText"></p>
+        <div id="tourOutcomes"></div>
+        <div class="source mono" id="tourSource"></div>
+        <div class="nav"><button id="tourPrev">← Prev</button><button id="tourNext">Next →</button></div>
       </article>
 
       <article id="info" class="card">
@@ -181,9 +179,10 @@
   <dialog id="aboutDialog">
     <button class="close" id="closeAbout" aria-label="Close">×</button>
     <h2>Every feature is a real number.</h2>
-    <div class="guide-row"><b>Continents</b><span>Six sectors, five large US companies each. Name shown on the continent.</span></div>
-    <div class="guide-row"><b>Mountains</b><span>One per company, ticker above the peak. Height = price growth since 2007 (log scale). Glow at the foot = this week's return <span class="swatch"></span> red down, green up.</span></div>
-    <div class="guide-row"><b>Drift</b><span>Correlation between sectors. Calm: continents spread out. Crisis: they collide into a supercontinent — diversification fails when it is needed most.</span></div>
+    <div class="guide-row"><b>Continents</b><span>Six fixed sector plates, five large US companies each. Hover a continent to highlight it.</span></div>
+    <div class="guide-row"><b>Mountains</b><span>One per company. Height = price growth since 2007 (log scale). The glowing marker on the summit = this week's return <span class="swatch"></span> red down, green up. Labels: hover, plus the week's 3 biggest gainers and losers.</span></div>
+    <div class="guide-row"><b>Fault lines</b><span>Each border between two sectors glows with their 60-day correlation: faint cracks when sectors move independently, orange lava when they move as one. In a crisis the whole planet cracks — diversification fails when it is needed most.</span></div>
+    <div class="guide-row"><b>City lights</b><span>Night-side lights per sector: brighter when trading volume is above normal.</span></div>
     <div class="guide-row"><b>Weather</b><span>Market fear (VIX): storms, red atmosphere, dimmer sun; lightning above 40.</span></div>
     <div class="guide-row"><b>Volcanoes</b><span>Weeks when stocks fell over 7% on average, on the two hardest-hit sectors. The planet shakes.</span></div>
     <div class="guide-row"><b>Keys</b><span>Space play · ←/→ week · Shift+←/→ year · 1–9 tour stops · Esc close</span></div>
