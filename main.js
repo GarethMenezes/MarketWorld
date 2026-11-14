@@ -60,7 +60,9 @@ const canvas = document.getElementById('scene');
 // antialias off: the bloom composer renders to its own targets, so MSAA here would be wasted work
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, CONFIG.maxPixelRatio));
-renderer.setSize(window.innerWidth, window.innerHeight);
+// The canvas lives in the left column (Gareth's layout), so size everything from it
+const viewSize = () => [Math.max(1, canvas.clientWidth), Math.max(1, canvas.clientHeight)];
+renderer.setSize(...viewSize(), false);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 
@@ -69,7 +71,7 @@ const SKY_CALM = new THREE.Color('#02040a');
 const SKY_STORM = new THREE.Color('#2a0508');
 scene.background = SKY_CALM.clone();
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 500);
+const camera = new THREE.PerspectiveCamera(45, viewSize()[0] / viewSize()[1], 0.1, 500);
 camera.position.set(0, 5, 17);
 
 const controls = new OrbitControls(camera, canvas);
@@ -81,7 +83,7 @@ controls.autoRotateSpeed = CONFIG.autoRotateSpeed;
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.4, 0.95);
+const bloom = new UnrealBloomPass(new THREE.Vector2(...viewSize()), 0.6, 0.4, 0.95);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -347,7 +349,7 @@ const state = {
   quake: 0, flash: 0, vix: 15,
   eruption: 0, targetEruption: 0, vents: [0, 1],
   selected: null,
-  touring: false, tourStop: 0,
+  touring: false, tourStop: 0, rotationPaused: false,
 };
 
 function setWeek(i, { quake = true } = {}) {
@@ -382,13 +384,30 @@ function setWeek(i, { quake = true } = {}) {
   updateInfoPanel();
   if (i !== prev) requestExplanation();
   slider.value = String(i);
-  sliderDate.textContent = data.dates[i];
+  sliderDate.textContent = fmtDate(data.dates[i]).toUpperCase();
 }
 
 // ───────────────────────────── UI ─────────────────────────────
 const $ = (id) => document.getElementById(id);
 const slider = $('slider'), sliderDate = $('sliderDate'), playBtn = $('play');
 slider.max = String(N - 1);
+$('weekTotal').textContent = String(N);
+const ticks = [];
+for (let y = 2007; y <= Number(data.dates[N - 1].slice(0, 4)); y += 2) {
+  const w = data.dates.findIndex((d) => d >= `${y}-01-01`);
+  if (w === -1) continue;
+  const b = document.createElement('button');
+  b.textContent = String(y);
+  b.style.left = `${(w / (N - 1)) * 100}%`;
+  b.addEventListener('click', () => { setPlaying(false); setWeek(w); });
+  $('ticks').appendChild(b);
+  ticks.push([w, b]);
+}
+function markTick(i) {
+  let cur = null;
+  for (const [w, b] of ticks) if (w <= i) cur = b;
+  for (const [, b] of ticks) b.classList.toggle('current', b === cur);
+}
 const pct = (x, d = 1) => (x == null ? '—' : `${x > 0 ? '+' : ''}${(x * 100).toFixed(d)}%`);
 const cls = (x) => (x == null ? '' : x > 0 ? 'up' : x < 0 ? 'down' : '');
 const fmtDate = (s) => new Date(s + 'T00:00:00Z').toLocaleDateString('en-GB',
@@ -410,9 +429,31 @@ function corrLabel(c) {
   return 'supercontinent';
 }
 
+// Card headline and phase come straight from the numbers (no invented narrative)
+function weekStory(i) {
+  const m = data.market, v = m.vix[i], c = m.avgCorr[i], r = m.ret[i];
+  if (r != null && r < CONFIG.quakeRet) return { phase: 'Crash week', risk: true, world: 'The erupting world', headline: 'The ground gives way.' };
+  if (v != null && v >= 40) return { phase: 'Panic', risk: true, world: 'The storm world', headline: 'Fear everywhere.' };
+  if (c != null && c > 0.75) return { phase: 'Everything moves together', risk: true, world: 'The supercontinent', headline: 'No place to hide.' };
+  if (v != null && v >= 25) return { phase: 'Stressed', risk: true, world: 'The restless world', headline: 'Clouds gathering.' };
+  if (c != null && c < 0.35) return { phase: 'Calm', risk: false, world: 'The open world', headline: 'Every sector on its own path.' };
+  return { phase: 'Normal', risk: false, world: 'The steady world', headline: 'Business as usual.' };
+}
+
 function updateStatsPanel() {
   const i = state.week, m = data.market;
-  $('date').textContent = `Week of ${fmtDate(data.dates[i])}`;
+  const story = weekStory(i);
+  $('date').textContent = fmtDate(data.dates[i]);
+  $('phase').textContent = story.phase;
+  $('phase').classList.toggle('risk', story.risk);
+  $('headline').textContent = story.headline;
+  $('planetTag').textContent = story.world;
+  $('planetTag').classList.toggle('risk', story.risk);
+  $('weekNo').textContent = String(i + 1).padStart(4, '0');
+  $('counter').textContent = `week ${i + 1} / ${N}`;
+  $('weather').innerHTML = `<span class="dot"></span> ${m.vix[i] == null ? '—' : `${vixLabel(m.vix[i])} skies · VIX ${m.vix[i].toFixed(0)}`}`;
+  $('weather').classList.toggle('risk', story.risk);
+  markTick(i);
   $('vix').textContent = m.vix[i] == null ? '—' : `${m.vix[i].toFixed(1)} · ${vixLabel(m.vix[i])}`;
   $('corr').textContent = m.avgCorr[i] == null ? '—' : `${m.avgCorr[i].toFixed(2)} · ${corrLabel(m.avgCorr[i])}`;
   $('mret').innerHTML = `<span class="${cls(m.ret[i])}">${pct(m.ret[i])}</span>`;
@@ -488,9 +529,9 @@ $('infoClose').addEventListener('click', () => select(null));
 function setPlaying(p) {
   state.playing = p;
   if (p && state.week >= N - 1) setWeek(0, { quake: false });
-  playBtn.textContent = p ? '❚❚' : '▶';
+  playBtn.textContent = p ? '❚❚ Pause' : '▶ Play history';
   playBtn.setAttribute('aria-label', p ? 'Pause' : 'Play');
-  controls.autoRotate = !p && !state.touring; // camera holds still while history plays or touring
+  controls.autoRotate = !p && !state.touring && !state.rotationPaused; // still while playing/touring
   if (!p) requestExplanation();
 }
 playBtn.addEventListener('click', () => setPlaying(!state.playing));
@@ -565,24 +606,64 @@ function goToStop(i) {
   startFly(focusDirection(t.focus, tmpV), t.focus === 'market' ? CONFIG.tour.marketDistance : CONFIG.tour.focusDistance);
 
   $('tour').style.display = 'block';
-  $('tourStep').textContent = `Tour stop ${state.tourStop + 1} of ${tours.length}`;
-  $('tourTitle').textContent = t.title;
-  $('tourDate').textContent = `Week of ${fmtDate(data.dates[state.week])}`;
+  $('tourNum').textContent = String(state.tourStop + 1).padStart(2, '0');
+  $('tourStep').textContent = `Stop ${state.tourStop + 1} of ${tours.length}`;
+  $('tourDate').textContent = fmtDate(data.dates[state.week]);
+  $('tourPhase').textContent = t.phase || t.title;
+  $('tourPhase').classList.toggle('risk', !!t.risk);
+  $('tourTitle').textContent = t.headline || t.title;
+  $('tourSummary').textContent = t.summary || (t.headline ? t.title : '');
+  $('tourSummary').style.display = $('tourSummary').textContent ? '' : 'none';
   $('tourText').textContent = t.narration || '';
   $('tourLabel').textContent = !t.narration ? '' :
-    t.narrationSource === 'ai' ? 'Generated by AI · uses only the numbers shown' : 'Summary from the data';
+    t.narrationSource === 'ai' ? 'What the data shows · generated by AI from the numbers' : 'What the data shows';
+  // good/bad and source text are hand-written in public/tours.json (Gareth's sourced chapters)
+  $('tourOutcomes').innerHTML = (t.good ? `<div class="outcome"><span class="symbol">↗</span><div><h3>THE GOOD / OPPORTUNITY</h3><p>${t.good}</p></div></div>` : '') +
+    (t.bad ? `<div class="outcome bad"><span class="symbol">↘</span><div><h3>THE BAD / PRESSURE</h3><p>${t.bad}</p></div></div>` : '');
+  $('tourSource').innerHTML = t.url ? `Source: <a href="${t.url}" target="_blank" rel="noopener noreferrer">${t.source} ↗</a>` : '';
+  $('story').scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function exitTour() {
   state.touring = false;
   $('tour').style.display = 'none';
-  controls.autoRotate = !state.playing;
+  controls.autoRotate = !state.playing && !state.rotationPaused;
 }
 
 $('tourBtn').addEventListener('click', () => goToStop(state.touring ? state.tourStop + 1 : 0));
 $('tourNext').addEventListener('click', () => goToStop(state.tourStop + 1));
 $('tourPrev').addEventListener('click', () => goToStop(state.tourStop - 1));
 $('tourExit').addEventListener('click', exitTour);
+$('prevStop').addEventListener('click', () => goToStop(state.touring ? state.tourStop - 1 : tours.length - 1));
+$('nextStop').addEventListener('click', () => goToStop(state.touring ? state.tourStop + 1 : 0));
+
+// ── Header: travel to a date (nearest trading week), field guide dialog
+const jumpDate = $('jumpDate');
+jumpDate.min = data.dates[0];
+jumpDate.max = data.dates[N - 1];
+$('dateForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!jumpDate.value) return;
+  const w = data.dates.findIndex((d) => d >= jumpDate.value);
+  setPlaying(false);
+  setWeek(w === -1 ? N - 1 : w);
+});
+$('about').addEventListener('click', () => $('aboutDialog').showModal());
+$('closeAbout').addEventListener('click', () => $('aboutDialog').close());
+
+// ── View controls: zoom and pause the slow camera spin
+function zoomBy(f) {
+  const d = THREE.MathUtils.clamp(camera.position.length() * f, controls.minDistance, controls.maxDistance);
+  camera.position.setLength(d);
+}
+$('zoomIn').addEventListener('click', () => zoomBy(0.85));
+$('zoomOut').addEventListener('click', () => zoomBy(1.18));
+$('rotate').addEventListener('click', () => {
+  state.rotationPaused = !state.rotationPaused;
+  $('rotate').setAttribute('aria-pressed', String(state.rotationPaused));
+  $('rotate').textContent = state.rotationPaused ? '↻' : 'Ⅱ';
+  controls.autoRotate = !state.rotationPaused && !state.playing && !state.touring;
+});
 
 // Click picking (ignore drags)
 const raycaster = new THREE.Raycaster();
@@ -591,7 +672,8 @@ let downAt = null;
 canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
 canvas.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
-  pointer.set((e.clientX / window.innerWidth) * 2 - 1, -(e.clientY / window.innerHeight) * 2 + 1);
+  const rect = canvas.getBoundingClientRect();
+  pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
   const hit = raycaster.intersectObjects(pickables, false).find((h) => h.object.visible);
   if (!hit) return;
@@ -599,12 +681,13 @@ canvas.addEventListener('pointerup', (e) => {
   select(u.ticker ? { ticker: u.ticker, sector: u.sector } : { ticker: null, sector: u.sector });
 });
 
-window.addEventListener('resize', () => {
-  camera.aspect = window.innerWidth / window.innerHeight;
+new ResizeObserver(() => {
+  const [w, h] = viewSize();
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  composer.setSize(window.innerWidth, window.innerHeight);
-});
+  renderer.setSize(w, h, false);
+  composer.setSize(w, h);
+}).observe(canvas);
 
 // ───────────────────────────── ANIMATION ─────────────────────────────
 const clock = new THREE.Clock();

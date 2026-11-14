@@ -13,7 +13,7 @@ TOURS = Path(__file__).parent.parent / "public" / "tours.json"
 
 
 def main():
-    tours = json.loads(TOURS.read_text())
+    tours = json.loads(TOURS.read_text(encoding="utf-8"))
     for t in tours:
         week = next(i for i, d in enumerate(DATES) if d >= t["date"])
         t["date"] = DATES[week]  # snap to the matching trading week
@@ -26,7 +26,7 @@ def main():
         t["narration"] = res["text"]
         t["narrationSource"] = res["source"]
         print(f"{t['date']}  {t['title']:32s} [{res['source']}] {res['text'][:70]}...")
-    TOURS.write_text(json.dumps(tours, indent=2) + "\n")
+    TOURS.write_text(json.dumps(tours, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":
