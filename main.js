@@ -46,8 +46,8 @@ const CONFIG = {
   autoRotateSpeed: 0.35,
   tour: { flySeconds: 2, marketDistance: 15, focusDistance: 11 },
 
-  // Render resolution: full screen resolution (up to 2×) for sharp edges and text.
-  maxPixelRatio: 2,
+  // Render resolution: as sharp as the 60 fps budget allows on integrated graphics.
+  maxPixelRatio: 1.75,      // Intel Arc iGPU, crisis week, 3 planets: 2x 18.4 ms · 1.75x 14.7 ms · 1.5x 13.6 ms
   planetLight: 1.5,         // sun strength in the planet shader (Gareth's was 3 with his own tone mapping)
 };
 
@@ -535,6 +535,8 @@ function setWeek(i, { quake = true } = {}) {
   if (i !== prev) requestExplanation();
   slider.value = String(i);
   sliderDate.textContent = fmtDate(data.dates[i]).toUpperCase();
+  if (document.activeElement !== $('jumpDate')) $('jumpDate').value = data.dates[i];
+  updateNeighbors?.(i);
 }
 
 // ───────────────────────────── UI ─────────────────────────────
@@ -560,6 +562,14 @@ function markTick(i) {
 }
 const pct = (x, d = 1) => (x == null ? '—' : `${x > 0 ? '+' : ''}${(x * 100).toFixed(d)}%`);
 const cls = (x) => (x == null ? '' : x > 0 ? 'up' : x < 0 ? 'down' : '');
+// Nearest week to an ISO date (Gareth): snaps both ways and clamps outside the data range
+function nearestWeek(dates, date) {
+  const t = Date.parse(`${date}T12:00:00Z`);
+  if (!Number.isFinite(t)) return 0;
+  let index = 0, best = Infinity;
+  dates.forEach((d, i) => { const gap = Math.abs(Date.parse(`${d}T12:00:00Z`) - t); if (gap < best) { best = gap; index = i; } });
+  return index;
+}
 const fmtDate = (s) => new Date(s + 'T00:00:00Z').toLocaleDateString('en-GB',
   { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
@@ -607,6 +617,9 @@ function updateStatsPanel() {
   $('vix').textContent = m.vix[i] == null ? '—' : `${m.vix[i].toFixed(1)} · ${vixLabel(m.vix[i])}`;
   $('fearK').textContent = `Fear (${FEAR})`;
   $('corr').textContent = m.avgCorr[i] == null ? '—' : `${corrLabel(m.avgCorr[i])} · corr ${m.avgCorr[i].toFixed(2)}`;
+  const drop = m.avgCorr[i] == null ? null : clamp01((m.avgCorr[i] - CONFIG.sea.corrLow) / (CONFIG.sea.corrHigh - CONFIG.sea.corrLow));
+  $('seaDrop').textContent = drop == null ? 'No correlation data · normal sea shown' : `Sea drop: ${Math.round(drop * 100)}% of the visual range`;
+  $('seaMeter').value = drop == null ? 0 : Math.round(drop * 100);
   $('mret').innerHTML = `<span class="${cls(m.ret[i])}">${pct(m.ret[i])}</span>`;
   const notes = [];
   if (m.ret[i] != null && m.ret[i] < CONFIG.quakeRet) notes.push('Earthquake: crash week');
@@ -704,7 +717,10 @@ slider.addEventListener('input', () => setWeek(Number(slider.value)));
 
 // Keyboard: Space play/pause · ←/→ one week · Shift+←/→ one year (52 weeks)
 window.addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement && e.target.type === 'text') return;
+  const t = e.target;
+  if (t instanceof HTMLSelectElement || t instanceof HTMLTextAreaElement
+    || (t instanceof HTMLInputElement && t.type !== 'range')) return;
+  if (state.sandbox && e.code !== 'Escape') return;
   if (e.code === 'Space') {
     e.preventDefault();
     setPlaying(!state.playing);
@@ -812,7 +828,7 @@ jumpDate.max = data.dates[N - 1];
 $('dateForm').addEventListener('submit', (e) => {
   e.preventDefault();
   if (!jumpDate.value) return;
-  const w = data.dates.findIndex((d) => d >= jumpDate.value);
+  const w = nearestWeek(data.dates, jumpDate.value);
   setPlaying(false);
   setWeek(w === -1 ? N - 1 : w);
 });
@@ -835,6 +851,7 @@ $('rotate').addEventListener('click', () => {
 
 // Click picking (ignore drags)
 const raycaster = new THREE.Raycaster();
+const pickSurface = new THREE.Sphere(new THREE.Vector3(), R * 0.995), pickPoint = new THREE.Vector3();
 const pointer = new THREE.Vector2();
 let downAt = null;
 canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
@@ -843,11 +860,17 @@ canvas.addEventListener('pointerup', (e) => {
   const rect = canvas.getBoundingClientRect();
   pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObjects(pickables, false).filter((h) => h.object.visible);
+  pickSurface.center.copy(world.position);
+  const ground = raycaster.ray.intersectSphere(pickSurface, pickPoint);
+  const groundDist = ground ? raycaster.ray.origin.distanceTo(pickPoint) : Infinity;
+  const hits = raycaster.intersectObjects(pickables, false)
+    .filter((h) => h.object.visible && (h.object.userData.marketId || h.distance <= groundDist + 0.15));
   // Craters lie flat on the surface, under the (invisible) continent pick mesh: let them win
   const hit = hits.find((h) => h.object.userData.crater) ?? hits[0];
   if (!hit) return;
   const u = hit.object.userData;
+  if (u.marketId) { goToMarket(u.marketId); return; }
+  if (state.sandbox) return;
   if (u.crater) { select({ crater: u.crater }); return; }
   select(u.ticker ? { ticker: u.ticker, sector: u.sector } : { ticker: null, sector: u.sector });
 });
@@ -865,6 +888,20 @@ new ResizeObserver(() => {
 // Predicted sector moves are shown with the planet's usual language: mountain colour and glow,
 // darker/redder land (uStressTint), eruptions on the two hardest-hit sectors, a tremor scaled to the
 // biggest fall. The regime sets weather and sea level the same way real calm/crisis weeks do.
+function setHistoryControls(disabled) {
+  for (const id of ['slider', 'play', 'tourBtn', 'prevStop', 'nextStop', 'jumpDate']) $(id).disabled = disabled;
+}
+// Average off-diagonal sector correlation on that regime's days (from stress.json)
+function regimeCorr(regime) {
+  const c = stress.regimes[regime].corr, v = [];
+  for (const a in c) for (const b in c[a]) if (a !== b && Number.isFinite(c[a][b])) v.push(c[a][b]);
+  return v.length ? v.reduce((x, y) => x + y, 0) / v.length : 0.3;
+}
+if (stress) {
+  const r = stress.regimes;
+  $('wiPeriod').textContent = `Simple linear model from ${data.dates[0].slice(0, 4)}–${data.dates.at(-1).slice(0, 4)} data: `
+    + `${r.calm.days.toLocaleString()} calm days and ${r.crisis.days.toLocaleString()} crisis days. Not a prediction or financial advice.`;
+}
 const sandbox = stress ? createSandbox({
   stress, $,
   enter() {
@@ -873,17 +910,19 @@ const sandbox = stress ? createSandbox({
     select(null);
     state.sandboxWeek = state.week;
     state.sandbox = true;
+    setHistoryControls(true);
   },
   exit() {
     state.sandbox = false;
     state.stressTarget.fill(0);
+    setHistoryControls(false);
     setWeek(state.sandboxWeek, { quake: false });
   },
   apply(moves, regime) {
     const crisis = regime === 'crisis';
     state.targetStorm = crisis ? 0.75 : 0.1;
     state.vix = crisis ? 45 : 14;
-    state.targetSea = seaFromCorr(crisis ? 0.8 : 0.2);
+    state.targetSea = seaFromCorr(regimeCorr(regime));          // that regime's real average correlation
     const order = SECTOR_NAMES.map((name, k) => [moves[name] ?? 0, k]).sort((a, b) => a[0] - b[0]);
     const worst = order[0][0];
     state.vents = [order[0][1], order[1][1]];
@@ -896,6 +935,8 @@ const sandbox = stress ? createSandbox({
       for (const m of c.mountains) {
         const u = m.userData;
         colorFromReturn(mv / 4, u.targetColor);               // −20% → full red
+        const g = u.stock.growth[state.sandboxWeek];             // mountains shrink by the predicted fall
+        if (g != null) u.targetHeight = heightFromGrowth(Math.max(1e-5, g * (1 + mv)));
         u.targetGlow = CONFIG.glow.base + CONFIG.glow.perMove * Math.min(1, Math.abs(mv) * 5);
       }
     });
@@ -932,6 +973,13 @@ if (soundWanted) {
 }
 
 // ───────────────────────────── MARKET SWITCHER ─────────────────────────────
+function goToMarket(id) {
+  if (id === MARKET.id) return;
+  const q = new URLSearchParams({ market: id, week: data.dates[state.sandbox ? state.sandboxWeek : state.week] });
+  document.body.classList.add('switching');              // fade out, then load the other planet
+  setTimeout(() => { location.search = q.toString(); }, 350);
+}
+$('referenceCoast').addEventListener('change', (e) => { planetUniforms.uShowReferenceCoast.value = e.target.checked ? 1 : 0; });
 // Each market is its own planet. Switching keeps the date: the new planet opens at the same week.
 (function buildSwitcher() {
   const box = $('marketSwitch');
@@ -941,18 +989,84 @@ if (soundWanted) {
     b.textContent = mk.short;
     b.title = mk.name;
     b.setAttribute('aria-pressed', String(mk.id === MARKET.id));
-    b.addEventListener('click', () => {
-      if (mk.id === MARKET.id) return;
-      const q = new URLSearchParams({ market: mk.id, week: data.dates[state.week] });
-      document.body.classList.add('switching');          // fade out, then load the other planet
-      setTimeout(() => { location.search = q.toString(); }, 350);
-    });
+    b.addEventListener('click', () => goToMarket(mk.id));
     box.appendChild(b);
   }
   $('marketName').textContent = MARKET.name;
   $('marketNote').textContent = data.meta?.note ?? '';
 })();
 
+// ───────────────────────────── NEIGHBOURING WORLDS ─────────────────────────────
+// Gareth's idea: the other markets float beside this planet as small live planets, showing their
+// own weather and sea level for the same date. They stay at the screen edges (they follow the
+// camera) and keep their own market's look. Click one to travel there.
+const NEIGHBOR_SCALE = 0.24;
+const neighbors = [];
+function addNeighbor(mk, w, idx) {
+  const look = PLANET_LOOKS[mk.id] ?? PLANET_LOOKS.us;
+  const mat = planet.material.clone();
+  const u = mat.uniforms;
+  u.uProjection.value = camera.projectionMatrix;          // clone() copied it; keep the live one
+  u.uStressTint.value = new Float32Array(6);
+  u.uWorldRadius.value = R * NEIGHBOR_SCALE;
+  u.uQuality.value = 1;
+  u.uEruption.value = 0;
+  u.uShowReferenceCoast.value = 0;
+  u.uWorldSeed.value = look.seed;
+  u.uWaterDeep.value.setRGB(...look.waterDeep);
+  u.uWaterSurface.value.setRGB(...look.waterSurface);
+  u.uOceanPalette.value = planetUniforms.uOceanPalette.value;
+  u.uNoiseTexture.value = planetUniforms.uNoiseTexture.value;
+  for (let c = 0; c < 6; c++) {                            // continent frames: same layout as this planet
+    u.uContinentDir.value[c].copy(Z).applyQuaternion(continents[c].group.quaternion);
+    u.uContinentRot.value[c].setFromMatrix4(new THREE.Matrix4().makeRotationFromQuaternion(continents[c].group.quaternion.clone().invert()));
+  }
+  const mesh = new THREE.Mesh(planet.geometry, mat);
+  mesh.scale.setScalar(NEIGHBOR_SCALE);
+  mesh.frustumCulled = false;
+  mesh.renderOrder = -2;
+  mesh.userData.marketId = mk.id;
+  scene.add(mesh);
+  pickables.push(mesh);
+  const label = makeLabel(`${mk.short} · explore`, 'market-label', `Open the ${mk.name} planet`);
+  scene.add(label);
+  neighbors.push({ mk, w, look, mesh, u, label, side: idx === 0 ? -1 : 1, atmoCalm: new THREE.Color(look.atmo) });
+  updateNeighbors(state.week);
+}
+// Loaded in the background so the main planet never waits for the other markets' data
+MARKETS.filter((mk) => mk.id !== MARKET.id).forEach((mk, idx) => {
+  fetch(`/${mk.world}`).then((r) => (r.ok ? r.json() : null)).then((w) => { if (w) addNeighbor(mk, w, idx); }).catch(() => {});
+});
+
+// Their weather and sea level for the current date (their own data, nearest week)
+function updateNeighbors(week) {
+  for (const nb of neighbors) {
+    const i = nearestWeek(nb.w.dates, data.dates[week]), m = nb.w.market;
+    const storm = stormFromVix(m.vix[i] ?? 13);
+    nb.u.uStorm.value = nb.u.uStress.value = storm;
+    nb.u.uSeaLevel.value = m.avgCorr[i] == null ? 0 : seaFromCorr(m.avgCorr[i]);
+    nb.u.uCloudsDensity.value = nb.look.cloudsCalm + (CONFIG.clouds.storm - nb.look.cloudsCalm) * storm;
+    nb.u.uAtmosphereColor.value.copy(nb.atmoCalm).lerp(ATMO_STORM, storm);
+    nb.u.uAccent.value.copy(nb.u.uAtmosphereColor.value);
+    nb.u.uSunIntensity.value = CONFIG.planetLight * (1 - 0.55 * storm);
+    nb.u.uAmbientLight.value = 0.05;
+  }
+}
+// Keep them at the left/right edges of the view (camera space), hidden on narrow screens
+const nbOffset = new THREE.Vector3();
+function placeNeighbors(t) {
+  const show = camera.aspect > 1.15;
+  for (const nb of neighbors) {
+    nb.mesh.visible = nb.label.visible = show;
+    if (!show) continue;
+    const depth = 24, halfW = depth * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * camera.aspect;
+    nbOffset.set(nb.side * halfW * 0.74, nb.side < 0 ? 1.2 : -1.2, -depth).applyMatrix4(camera.matrixWorld);
+    nb.mesh.position.copy(nbOffset);
+    nb.u.uPlanetPosition.value.copy(nbOffset);
+    nb.u.uTime.value = t;
+    nb.label.position.copy(nbOffset).addScaledVector(camera.up, -R * NEIGHBOR_SCALE * 1.55);
+  }
+}
 // ───────────────────────────── ASK THE PLANET ─────────────────────────────
 createAsk({
   $, data, fmtDate, market: MARKET.id,
@@ -1073,6 +1187,8 @@ function animate() {
   audio.update(state.storm, clamp01(state.sea / CONFIG.sea.lowest));
   updateFly(dt);
   controls.update(dt);
+  camera.updateMatrixWorld();
+  placeNeighbors(t);                                  // after the camera moves: no lag
   updateLabels();
   composer.render(dt);
   labelRenderer.render(scene, camera);
@@ -1086,7 +1202,7 @@ if (import.meta.env.DEV) window.mw = { scene, camera, controls, continents, plan
 function weekFromUrl() {
   const w = new URLSearchParams(location.search).get('week');
   if (!w) return null;
-  const i = data.dates.findIndex((d) => d >= w);
+  const i = nearestWeek(data.dates, w);
   return i === -1 ? N - 1 : i;
 }
 const start = weekFromUrl() ?? data.dates.findIndex((d) => d >= '2007-06-29');

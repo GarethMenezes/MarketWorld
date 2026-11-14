@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#000000" />
   <title>Market Worlds</title>
-  <meta name="description" content="Twenty years of real US stock market data as a living planet. A DurHack 2026 project." />
+  <meta name="description" content="Explore US, UK and Asian market history as three living planets. A DurHack 2026 project." />
   <style>
     :root {
       color-scheme: dark;
@@ -74,6 +74,27 @@
     .nav button { background: none; border: 1px solid var(--line2); border-radius: 15px; padding: 4px 12px; font-size: 12px; color: var(--muted); }
     .nav button:hover { color: var(--text); }
     .fine { margin-top: 18px; color: var(--dim); font-size: 10.5px; line-height: 1.7; }
+    /* World heading (Gareth's design) */
+    .world-heading > .mono { font-size: 9px; color: var(--muted); }
+    .world-heading h1 { font-size: 24px; letter-spacing: -.7px; font-weight: 450; margin: 2px 0; color: var(--text); }
+    .world-heading .market-switch { margin-top: 10px; }
+    .market-label { font: 10px ui-monospace, Consolas, monospace; letter-spacing: 2px; color: #b4ddf0; text-shadow: 0 2px 7px #000;
+      white-space: nowrap; pointer-events: none; }
+    /* Sea-level gauge (Gareth) */
+    .sea-scale { margin: 12px 0 6px; padding: 12px; border: 1px solid var(--line2); border-radius: 8px; background: #050505; }
+    .sea-scale .mono { font-size: 9px; color: #aac4d3; }
+    .sea-scale meter { display: block; width: 100%; height: 8px; margin: 9px 0 4px; }
+    .sea-scale meter::-webkit-meter-bar { border: 0; background: #1a2d3b; border-radius: 6px; }
+    .sea-scale meter::-webkit-meter-optimum-value { background: linear-gradient(90deg, #4b99ba, #dec495); border-radius: 6px; }
+    .sea-endpoints { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); }
+    .sea-key { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 10px 0 8px; font-size: 10px; color: #a7b6bf; }
+    .sea-key i { display: inline-block; width: 8px; height: 8px; margin-right: 4px; border-radius: 2px; }
+    .sea-key .water { background: #3887c0; } .sea-key .shelf { background: #c6a471; }
+    .coast-toggle { display: flex; gap: 7px; align-items: center; font-size: 11px; color: #c6d0d5; cursor: pointer; }
+    .coast-toggle input { margin: 0; accent-color: #8fcce0; }
+    .sea-scale small { display: block; color: var(--dim); font-size: 10px; margin-top: 6px; }
+    .wi-title { margin: 10px 0 4px; }
+    button:disabled { opacity: .35; cursor: default; }
     /* Market switcher: one planet per market */
     .tl { pointer-events: auto; }
     .market-switch { display: flex; border: 1px solid var(--line2); border-radius: 16px; overflow: hidden; width: max-content; margin-bottom: 8px; }
@@ -137,6 +158,9 @@
     .swatch { display: inline-block; width: 36px; height: 5px; border-radius: 3px; vertical-align: middle; background: linear-gradient(90deg, #ff3030, #ffd23a, #2fe36a); }
 
     @media (max-width: 900px) {
+      .planet-wrap { min-height: 470px; }
+      .world-heading h1 { font-size: 20px; }
+      .ask-form input { width: 150px; }
       body { overflow: auto; }
       main { display: block; height: auto; padding-bottom: var(--timebar); }
       .planet-wrap { height: 72svh; }
@@ -151,9 +175,11 @@
     <section class="planet-wrap" aria-label="Interactive market planet">
       <canvas id="scene" tabindex="0" aria-label="3D planet built from stock market data. Drag to rotate, scroll to zoom, click a mountain for details."></canvas>
       <div class="label-layer" id="labels"></div>
-      <div class="overlay tl">
+      <div class="overlay tl world-heading">
+        <span class="mono">Market Worlds</span>
+        <h1 id="marketName">—</h1>
+        <div class="mono">Week <b id="weekNo">—</b> / <span id="weekTotal">—</span></div>
         <div class="market-switch" id="marketSwitch" role="group" aria-label="Choose a market planet"></div>
-        <div class="mono market-name"><b id="marketName"></b> · Week <b id="weekNo">—</b> / <span id="weekTotal">—</span></div>
       </div>
       <div class="overlay tr">
         <form id="askForm" class="ask-form" role="search">
@@ -181,7 +207,8 @@
         <span class="mono" id="askLabel" style="color:var(--dim)"></span>
       </article>
       <article id="whatif" class="card">
-        <div class="meta mono"><span style="color:var(--accent)">What if?</span><span>stress test</span></div>
+        <div class="meta mono"><span style="color:var(--accent)">What if?</span><span>historical model</span></div>
+        <h2 class="wi-title">One shock.<br>Different worlds.</h2>
         <p class="wi-headline" id="wiHeadline"></p>
         <div class="wi-controls">
           <label class="mono" for="wiSector">Shock</label>
@@ -193,7 +220,7 @@
           <button id="wiCalm" aria-pressed="false">Calm</button><button id="wiCrisis" aria-pressed="true">Crisis</button>
         </div>
         <div id="wiBars"></div>
-        <p class="fine">Simple linear model from historical data (2007–today). Not a prediction or financial advice.</p>
+        <p class="fine" id="wiPeriod">Simple linear model from historical data (2007–today). Not a prediction or financial advice.</p>
         <div class="nav"><button id="wiExit">Exit · back to the timeline</button></div>
       </article>
 
@@ -217,6 +244,14 @@
         <div class="row"><span class="k" id="fearK">Fear (VIX)</span><span class="v" id="vix">—</span></div>
         <div class="row"><span class="k">Sea level</span><span class="v" id="corr">—</span></div>
         <div class="row"><span class="k">Market</span><span class="v" id="mret">—</span></div>
+        <div class="sea-scale" id="seaScale">
+          <div class="mono" id="seaDrop">Correlation sets the waterline</div>
+          <meter id="seaMeter" min="0" max="100" value="0" aria-label="Sea-level drop in the visual model"></meter>
+          <div class="sea-endpoints"><span>Normal waterline</span><span>Lowest</span></div>
+          <div class="sea-key"><span><i class="water"></i>Water depth</span><span><i class="shelf"></i>Exposed seabed</span></div>
+          <label class="coast-toggle"><input id="referenceCoast" type="checkbox" checked /> Show normal coastline</label>
+          <small>White outline = normal coast. Visual scale, not metres.</small>
+        </div>
         <div id="mood" class="mono"></div>
       </article>
 
@@ -231,7 +266,9 @@
       <div class="fine"><span id="marketNote"></span><br>For exploration and education — not financial advice.<br>
         Planet shader: <a href="https://github.com/jsulpis/realtime-planet-shader" target="_blank" rel="noopener noreferrer">Julien Sulpis</a>
         (<a href="licenses/realtime-planet-shader.txt">GPL-3.0</a>), adapted by Gareth Menezes ·
-        <a href="https://github.com/Jaysmito101/TerraForge3D" target="_blank" rel="noopener noreferrer">TerraForge3D</a> (<a href="licenses/TerraForge3D.txt">MIT</a>)</div>
+        <a href="https://github.com/Jaysmito101/TerraForge3D" target="_blank" rel="noopener noreferrer">TerraForge3D</a> (<a href="licenses/TerraForge3D.txt">MIT</a>) ·
+        <a href="https://github.com/archimedix/sea-level-explorer" target="_blank" rel="noopener noreferrer">Sea Level Explorer</a> (<a href="licenses/sea-level-explorer.txt">MIT</a>) ·
+        <a href="https://github.com/mrdoob/three.js" target="_blank" rel="noopener noreferrer">Three.js Water / Sky</a> (<a href="licenses/three.txt">MIT</a>)</div>
     </aside>
   </main>
 
@@ -251,10 +288,10 @@
   <dialog id="aboutDialog">
     <button class="close" id="closeAbout" aria-label="Close">×</button>
     <h2>Every feature is a real number.</h2>
-    <div class="guide-row"><b>Planets</b><span>One planet per market — switch at the top left. Same date, different market.</span></div>
-    <div class="guide-row"><b>Continents</b><span>Six sectors, five large companies each, in the market you picked (US, UK or Asia-Pacific). Name shown on the continent.</span></div>
+    <div class="guide-row"><b>Planets</b><span>One planet per market — switch at the top left, or click a small neighbouring planet. Same date, different market.</span></div>
+    <div class="guide-row"><b>Continents</b><span>Six sectors, five large companies each, in the market you picked (US, UK or Asia-Pacific). These baskets are not official market indexes. Name shown on the continent.</span></div>
     <div class="guide-row"><b>Mountains</b><span>One per company, ticker above the peak. Height = price growth since 2007 (log scale). Glow at the foot = this week's return <span class="swatch"></span> red down, green up.</span></div>
-    <div class="guide-row"><b>Sea level</b><span>Average correlation between sectors. Calm: normal sea, six separate continents. As sectors start moving together the sea falls and wide salt flats appear around every coast; at correlation 0.85+ the sea is at its lowest — diversification fails when it is needed most. The faint ring marks the normal shoreline.</span></div>
+    <div class="guide-row"><b>Sea level</b><span>Average correlation between sectors. Calm: normal sea, six separate continents. As sectors start moving together the sea falls and wide salt flats appear around every coast; at correlation 0.85+ the sea is at its lowest — diversification fails when it is needed most. Pale blue is shallow water, tan is exposed seabed; the optional white outline marks the normal coastline. The scale illustrates correlation, not real sea height.</span></div>
     <div class="guide-row"><b>Weather</b><span>Market fear (the VIX in the US; realised volatility for the UK and Asia): storms, red atmosphere, dimmer sun; lightning above 40.</span></div>
     <div class="guide-row"><b>Volcanoes</b><span>Weeks when stocks fell over 7% on average, on the two hardest-hit sectors. The planet shakes.</span></div>
     <div class="guide-row"><b>Keys</b><span>Space play · ←/→ week · Shift+←/→ year · 1–9 tour stops · Esc close</span></div>
