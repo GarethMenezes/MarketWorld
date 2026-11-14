@@ -123,6 +123,11 @@ def files_for(mid):
     return f"world{suffix}.json", f"stress{suffix}.json", f"raw{'' if mid == 'us' else '-' + mid}.pkl"
 
 
+def tours_file(mid):
+    """US: hand-curated public/tours.json. Other markets: generated from their own data."""
+    return "tours.json" if mid == "us" else f"tours-{mid}.json"
+
+
 def use_market(mid):
     global SECTORS, VIX, MARKET_ID, RAW, OUT, STRESS_OUT
     m = MARKETS[mid]
@@ -288,6 +293,60 @@ def build_shocks(mkt_daily, sec, dates):
     return shocks
 
 
+def build_tours(world):
+    """Data-driven tour for markets without a curated one (idea from Gareth's sota commit).
+
+    Each stop is a week picked by a rule on this market's own numbers; the narration only
+    restates those numbers.
+    """
+    d, m = world["dates"], world["market"]
+    fear = world["meta"]["fearLabel"]
+    sectors = world["sectors"]
+
+    def pick(series, best, year_from=None, year_to=None):
+        idx = [i for i, v in enumerate(series) if v is not None
+               and (year_from is None or int(d[i][:4]) >= year_from)
+               and (year_to is None or int(d[i][:4]) <= year_to)]
+        return (max if best else min)(idx, key=lambda i: series[i]) if idx else None
+
+    def worst_sector(i):
+        rows = [(s["ret"][i], s["name"]) for s in sectors if s["ret"][i] is not None]
+        return min(rows)[1] if rows else "market"
+
+    def pct(x):
+        return "n/a" if x is None else f"{x * 100:+.1f}%"
+
+    rules = [
+        ("Sharpest fall of 2008", pick(m["ret"], False, 2008, 2008), "worst", "CRASH WEEK", True),
+        ("Peak fear", pick(m["vix"], True), "market", "PEAK FEAR", True),
+        ("Strongest rebound of 2009", pick(m["ret"], True, 2009, 2009), "market", "REBOUND", False),
+        ("Sectors most in sync", pick(m["avgCorr"], True), "market", "LOCKSTEP", True),
+        ("A quiet week in 2017", pick(m["vix"], False, 2017, 2017), "market", "CALM", False),
+        ("Sharpest fall of 2020", pick(m["ret"], False, 2020, 2020), "worst", "PANDEMIC CRASH", True),
+        ("Strongest week of 2020", pick(m["ret"], True, 2020, 2020), "market", "REBOUND", False),
+        ("Worst week since 2021", pick(m["ret"], False, 2021), "worst", "SELL-OFF", True),
+    ]
+    tours, seen = [], set()
+    for title, i, focus, phase, risk in rules:
+        if i is None or i in seen:
+            continue
+        seen.add(i)
+        focus = worst_sector(i) if focus == "worst" else focus
+        f, c = m["vix"][i], m["avgCorr"][i]
+        line = f"In the week ending {d[i]}, the {world['meta']['name']} market moved {pct(m['ret'][i])}"
+        if focus != "market":
+            sec = next(s for s in sectors if s["name"] == focus)
+            line += f" and {focus}, the hardest-hit sector, moved {pct(sec['ret'][i])}"
+        line += "."
+        if f is not None:
+            line += f" Fear ({fear}) was {f:.0f}."
+        if c is not None:
+            line += f" Average sector correlation was {c:.2f}."
+        tours.append({"date": d[i], "title": title, "focus": focus, "phase": phase, "risk": risk,
+                      "narration": line, "narrationSource": "data"})
+    return sorted(tours, key=lambda t: t["date"])
+
+
 def build_stress(sec, vix_daily):
     """'What if?' sandbox data: how each sector moved per 1% move in another, by regime.
 
@@ -330,6 +389,10 @@ def build_market(mid):
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps(world, separators=(",", ":")))
     STRESS_OUT.write_text(json.dumps(stress, indent=1))
+    if mid != "us":
+        tours = build_tours(world)
+        (ROOT / "public" / tours_file(mid)).write_text(json.dumps(tours, indent=1, ensure_ascii=False), encoding="utf-8")
+        print(f"Tour: {len(tours)} stops -> public/{tours_file(mid)}")
     print(f"Wrote {OUT} ({OUT.stat().st_size / 1e6:.2f} MB), "
           f"{len(world['dates'])} weeks, {len(world['stocks'])} stocks")
 
@@ -341,7 +404,8 @@ def write_index():
         world_f, stress_f, _ = files_for(mid)
         if (ROOT / "public" / world_f).exists():
             out.append({"id": mid, "name": m["name"], "short": m["short"], "world": world_f,
-                        "stress": stress_f, "fearLabel": m["fearLabel"], "note": m["note"]})
+                        "stress": stress_f, "tours": tours_file(mid),
+                        "fearLabel": m["fearLabel"], "note": m["note"]})
     INDEX_OUT.write_text(json.dumps(out, indent=1))
     print(f"\nWrote {INDEX_OUT}: {[x['id'] for x in out]}")
 

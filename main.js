@@ -12,6 +12,7 @@ import { createSandbox } from './sandbox.js';
 import { createAsk } from './ask.js';
 import { createMeteors } from './meteors.js';
 import { createAudio } from './audio.js';
+import { buildOceanPalette } from './ocean-palette.js';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
 // Tuned on real data 2007–2026 (see check_world.py output).
@@ -177,6 +178,15 @@ scene.add(sunGlow);
 // shader as adapted by Gareth (GPL-3.0, see NOTICES.md), driven by market data below.
 // Drawn on a back-faced sphere big enough to hold the atmosphere and ash plumes; the
 // shader ray-traces the real planet and writes depth so mesh mountains sit on it.
+function makeOceanPalette() {
+  const size = 512;
+  const tex = new THREE.DataTexture(buildOceanPalette(size), size, 1, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.minFilter = tex.magFilter = THREE.LinearFilter;
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
 function makeNoiseTexture() {
   const size = 32, bytes = new Uint8Array(size ** 3);
   let seed = 74777; // deterministic, same as Gareth's version
@@ -212,6 +222,8 @@ const planetUniforms = {
   uWaterDeep: { value: new THREE.Color(...LOOK.waterDeep) },
   uWaterSurface: { value: new THREE.Color(...LOOK.waterSurface) },
   uWorldSeed: { value: LOOK.seed },
+  uOceanPalette: { value: makeOceanPalette() },   // depth colours (Gareth, Sea Level Explorer stops)
+  uShowReferenceCoast: { value: 1 },             // normal shoreline marked when the sea falls
   uRockColor: { value: new THREE.Color(0.32, 0.29, 0.26) },
   uAccent: { value: ATMO_CALM.clone() },
   uContinentDir: { value: Array.from({ length: 6 }, () => new THREE.Vector3(0, 0, 1)) },
@@ -711,8 +723,9 @@ playBtn.addEventListener('keydown', (e) => { if (e.code === 'Space') e.preventDe
 // ───────────────────────────── GUIDED TOURS ─────────────────────────────
 // public/tours.json: [{ date, title, focus: "market" | sector | ticker, narration, narrationSource }]
 // Narrations are pre-generated (python -m server.make_tours) so the tour works offline.
-tours = MARKET.id !== 'us' ? [] // the tour narrates US events
-  : await fetch('/tours.json').then((r) => (r.ok ? r.json() : [])).catch(() => []);
+// US: hand-curated tour (with Gareth's sourced chapters). UK/Asia: generated from their own data.
+tours = await fetch(`/${MARKET.tours ?? (MARKET.id === 'us' ? 'tours.json' : `tours-${MARKET.id}.json`)}`)
+  .then((r) => (r.ok ? r.json() : [])).catch(() => []);
 if (!tours.length) for (const id of ['tourBtn', 'prevStop', 'nextStop']) $(id).style.display = 'none';
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const tourQ = new THREE.Quaternion(), tmpV = new THREE.Vector3();

@@ -5,6 +5,7 @@
   "short": "US",
   "world": "world.json",
   "stress": "stress.json",
+  "tours": "tours.json",
   "fearLabel": "VIX",
   "note": "30 large US companies; fear = the VIX index."
  },
@@ -14,6 +15,7 @@
   "short": "UK",
   "world": "world-uk.json",
   "stress": "stress-uk.json",
+  "tours": "tours-uk.json",
   "fearLabel": "realised vol",
   "note": "30 large London-listed companies (prices in pence); fear = realised volatility, because no UK fear index is freely available."
  },
@@ -23,6 +25,7 @@
   "short": "Asia",
   "world": "world-asia.json",
   "stress": "stress-asia.json",
+  "tours": "tours-asia.json",
   "fearLabel": "realised vol",
   "note": "30 large companies from Japan, China/Hong Kong, Korea, Taiwan and Singapore (returns in each stock's local currency); fear = realised volatility."
  }

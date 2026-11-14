@@ -193,8 +193,13 @@ from server.ask import Asker, NO_ADVICE, is_advice  # noqa: E402
 
 _tours_path = Path(__file__).parent.parent / "public" / "tours.json"
 TOURS = json.loads(_tours_path.read_text(encoding="utf-8")) if _tours_path.exists() else []
-# One asker per market; tours (US events and narrations) only for the US planet
-ASKERS = {mid: Asker(mk.world, TOURS if mid == "us" else [],
+# One asker per market, each with its own tour events as context
+def _tours_for(mid):
+    f = PUBLIC / ("tours.json" if mid == "us" else f"tours-{mid}.json")
+    return json.loads(f.read_text(encoding="utf-8")) if f.exists() else []
+
+
+ASKERS = {mid: Asker(mk.world, _tours_for(mid),
                      (lambda t, s, w, _mk=mk: gather(t, s, w, None, _mk)), template)
           for mid, mk in MARKETS.items()}
 _ask_cache: dict[str, dict] = {}
