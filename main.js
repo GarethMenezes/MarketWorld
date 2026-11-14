@@ -11,6 +11,7 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { createSandbox } from './sandbox.js';
 import { createAsk } from './ask.js';
 import { createMeteors } from './meteors.js';
+import { createAudio } from './audio.js';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
 // Tuned on real data 2007–2026 (see check_world.py output).
@@ -444,6 +445,7 @@ function pairCorrAt(a, b, i) {
 
 // Meteor strikes for shock days (world.json "shocks"); sound hooks are attached later
 const meteorHooks = { launch: null, impact: null };
+const audio = createAudio();      // sound: muted until the speaker button is clicked
 const meteors = createMeteors({
   world, R, plateDirs: PLATE_DIRS, sectorNames: SECTOR_NAMES, shocks: data.shocks || [],
   onLaunch: (size) => meteorHooks.launch?.(size), onImpact: (size) => meteorHooks.impact?.(size),
@@ -473,6 +475,7 @@ function setWeek(i, { quake = true } = {}) {
   if (m.avgCorr[i] != null) state.targetSea = seaFromCorr(m.avgCorr[i]);
   if (quake && i !== prev && m.ret[i] != null && m.ret[i] < CONFIG.quakeRet) {
     state.quake = Math.max(state.quake, Math.min(1, m.ret[i] / -0.15));
+    audio.quake(Math.min(1, m.ret[i] / -0.15));
   }
   // Volcanoes erupt in crash weeks, on the two sectors that fell hardest this week
   const r = m.ret[i];
@@ -849,6 +852,7 @@ const sandbox = stress ? createSandbox({
     state.vents = [order[0][1], order[1][1]];
     state.targetEruption = worst < -0.1 ? 0.3 + 0.7 * clamp01(-worst / 0.35) : 0;
     state.quake = Math.max(state.quake, clamp01(-worst / 0.4) * 0.8);
+    audio.quake(clamp01(-worst / 0.4));
     continents.forEach((c, k) => {
       const mv = moves[SECTOR_NAMES[k]] ?? 0;
       state.stressTarget[k] = mv < 0 ? clamp01(-mv / 0.35) : 0;
@@ -861,6 +865,34 @@ const sandbox = stress ? createSandbox({
   },
 }) : null;
 if (!stress) $('whatIfBtn').style.display = 'none';
+
+// ───────────────────────────── SOUND ─────────────────────────────
+// Muted by default. The choice is remembered; if it was on, sound starts at the first click/key
+// (browsers only allow audio after a user gesture).
+meteorHooks.launch = (size) => audio.meteor(size);
+meteorHooks.impact = (size) => audio.impact(size);
+const soundBtn = $('soundBtn');
+function showSound(on) {
+  soundBtn.textContent = on ? '🔊' : '🔇';
+  soundBtn.setAttribute('aria-pressed', String(on));
+  soundBtn.setAttribute('aria-label', on ? 'Mute sound' : 'Turn sound on');
+}
+function rememberSound(on) { try { localStorage.setItem('mw-sound', on ? '1' : '0'); } catch { /* private mode */ } }
+soundBtn.addEventListener('click', (e) => {
+  e.stopPropagation();
+  const on = !audio.isEnabled();
+  audio.setEnabled(on);
+  showSound(on);
+  rememberSound(on);
+});
+let soundWanted = false;
+try { soundWanted = localStorage.getItem('mw-sound') === '1'; } catch { /* storage blocked */ }
+showSound(false);
+if (soundWanted) {
+  const start = () => { if (!audio.isEnabled()) { audio.setEnabled(true); showSound(true); } };
+  window.addEventListener('pointerdown', start, { once: true });
+  window.addEventListener('keydown', start, { once: true });
+}
 
 // ───────────────────────────── ASK THE PLANET ─────────────────────────────
 createAsk({
@@ -964,6 +996,7 @@ function animate() {
   // Lightning: random flashes while VIX is above the threshold
   if (state.vix > CONFIG.lightningVix && Math.random() < dt * (0.4 + (state.vix - CONFIG.lightningVix) * 0.04)) {
     state.flash = 1;
+    audio.thunder();
   }
   state.flash *= Math.exp(-dt * 14);
   pu.uFlash.value = state.flash;
@@ -978,6 +1011,7 @@ function animate() {
   } else if (state.quake > 0) { state.quake = 0; world.position.set(0, 0, 0); }
 
   meteors.update(dt);
+  audio.update(state.storm, clamp01(state.sea / CONFIG.sea.lowest));
   updateFly(dt);
   controls.update(dt);
   updateLabels();
@@ -987,7 +1021,7 @@ function animate() {
 }
 
 // Dev-only handle for debugging in the browser console
-if (import.meta.env.DEV) window.mw = { scene, camera, controls, continents, planet, planetUniforms, renderer, composer, bloom, state, CONFIG };
+if (import.meta.env.DEV) window.mw = { scene, camera, controls, continents, planet, planetUniforms, renderer, composer, bloom, state, CONFIG, audio };
 
 // ───────────────────────────── START ─────────────────────────────
 function weekFromUrl() {
