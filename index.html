@@ -3,241 +3,191 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#091310" />
+  <meta name="theme-color" content="#000000" />
   <title>Market Worlds</title>
   <meta name="description" content="Twenty years of real US stock market data as a living planet. A DurHack 2026 project." />
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%23091310'/%3E%3Ctext x='50' y='73' text-anchor='middle' font-size='76' fill='%23a3edb1'%3E◈%3C/text%3E%3C/svg%3E" />
-  <!-- Visual design adapted from Gareth's version (gareth branch) -->
   <style>
     :root {
       color-scheme: dark;
-      --bg: #091310; --panel: #0d1915; --text: #e9eee7; --muted: #93a59b;
-      --green: #a3edb1; --red: #f29c8d; --line: #2a3831; --line2: #4c6853;
-      --header: 72px; --timebar: 88px;
+      --bg: #000; --text: #f2f2f2; --muted: #8a8a8a; --dim: #5c5c5c; --line: #1c1c1c; --line2: #333;
+      --accent: #a3edb1; --red: #f29c8d; --timebar: 64px; --panel: 340px;
     }
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; }
-    body { background: var(--bg); color: var(--text); font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow: hidden; }
+    body { background: var(--bg); color: var(--text); font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow: hidden; }
     button, input { font: inherit; color: inherit; }
     button { cursor: pointer; }
-    button:focus-visible, a:focus-visible, input:focus-visible, canvas:focus-visible { outline: 2px solid var(--green); outline-offset: 4px; }
+    button:focus-visible, a:focus-visible, input:focus-visible, canvas:focus-visible { outline: 1px solid var(--text); outline-offset: 3px; }
     a { color: inherit; }
-    .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; }
-    .eyebrow { font: 10px/1.5 ui-monospace, Consolas, monospace; letter-spacing: 1.7px; color: var(--green); display: flex; align-items: center; gap: 8px; text-transform: uppercase; }
-    .dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; display: inline-block; }
-    .up { color: var(--green); } .down { color: var(--red); }
+    .mono { font: 10px/1.6 ui-monospace, "Cascadia Mono", Consolas, monospace; letter-spacing: 1.2px; text-transform: uppercase; }
+    .up { color: var(--accent); } .down { color: var(--red); }
 
-    /* Header */
-    header { height: var(--header); padding: 0 3%; display: flex; align-items: center; justify-content: space-between; gap: 20px; border-bottom: 1px solid var(--line); }
-    .brand { display: flex; align-items: center; gap: 12px; font-size: 13px; letter-spacing: 2px; font-weight: 700; }
-    .brand-icon { font-size: 30px; color: var(--green); }
-    .date-form label { display: block; font: 9px ui-monospace, Consolas, monospace; letter-spacing: 1.5px; color: var(--green); margin-bottom: 3px; }
-    .date-form div { display: flex; gap: 6px; }
-    .date-form input { background: #0c1913; border: 1px solid var(--line2); border-radius: 4px; padding: 4px 8px; font-size: 13px; }
-    .date-form button { background: var(--green); color: #112819; border: 0; border-radius: 4px; padding: 4px 12px; font-size: 12px; }
-    #about { border: 0; background: none; color: #c7d2c9; font-size: 12px; }
-    #about span { margin-left: 12px; color: var(--green); }
+    main { display: grid; grid-template-columns: 1fr var(--panel); height: calc(100svh - var(--timebar)); }
 
-    /* Two columns */
-    main { display: grid; grid-template-columns: 58% 42%; height: calc(100svh - var(--header) - var(--timebar)); }
-    .observatory { position: relative; border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 22px 4% 14px; min-height: 0; }
-    .observatory h1 { font-size: clamp(26px, 2.6vw, 42px); line-height: 1.08; letter-spacing: -1.6px; font-weight: 450; margin: 10px 0 0; }
-    .observatory h1 em { font-family: Georgia, serif; font-weight: 400; color: var(--green); }
-    .planet-wrap { position: relative; flex: 1; min-height: 240px; margin: 6px -4.5% 0; }
+    /* Planet: as much of the screen as possible */
+    .planet-wrap { position: relative; min-width: 0; }
     #scene { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
     #scene:active { cursor: grabbing; }
-    .coordinate { position: absolute; top: 14px; left: 6%; font: 10px ui-monospace, Consolas, monospace; letter-spacing: 1px; color: var(--muted); pointer-events: none; }
-    .coordinate b { color: var(--text); font-weight: 400; }
-    .planet-tag { position: absolute; bottom: 16px; left: 6%; font: 10px ui-monospace, Consolas, monospace; letter-spacing: 1.5px; color: var(--green); pointer-events: none; text-transform: uppercase; }
-    .planet-tag.risk { color: var(--red); }
-    .view-controls { position: absolute; right: 6%; bottom: 12px; display: flex; gap: 8px; }
-    .view-controls button { border: 1px solid var(--line2); border-radius: 50%; background: #0c1913cc; width: 34px; height: 34px; font-size: 14px; }
-    .world-caption { display: flex; justify-content: space-between; font: 11px ui-monospace, Consolas, monospace; color: var(--muted); border-bottom: 1px solid var(--line); padding: 8px 0 12px; }
-    #weather { color: var(--green); } #weather.risk { color: var(--red); }
-    .legend { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 11px; color: #bdcabe; margin-top: 10px; }
-    .legend i { width: 7px; height: 7px; display: inline-block; border-radius: 50%; margin-right: 6px; }
-    .swatch { display: inline-block; width: 40px; height: 6px; border-radius: 3px; vertical-align: middle; margin: 0 4px;
-      background: linear-gradient(90deg, #ff3030, #ffd23a, #2fe36a); }
+    .overlay { position: absolute; color: var(--muted); pointer-events: none; }
+    .tl { top: 18px; left: 22px; } .bl { bottom: 16px; left: 22px; } .tr { top: 14px; right: 18px; pointer-events: auto; display: flex; gap: 8px; align-items: center; }
+    .br { bottom: 14px; right: 18px; pointer-events: auto; display: flex; gap: 6px; }
+    .overlay b { color: var(--text); font-weight: 400; }
+    #planetTag { color: var(--text); } #planetTag.risk, #weather.risk { color: var(--red); }
+    .round { border: 1px solid var(--line2); border-radius: 50%; background: #000a; width: 30px; height: 30px; font-size: 13px; color: var(--muted); }
+    .round:hover { color: var(--text); border-color: var(--muted); }
+    .date-form { display: flex; gap: 4px; }
+    .date-form input { background: #000a; border: 1px solid var(--line2); border-radius: 15px; padding: 3px 10px; font-size: 12px; color: var(--muted); height: 30px; }
+    .date-form button { display: none; }
 
-    /* Story column */
-    .story { overflow-y: auto; padding: 8px 9% 40px 7%; min-height: 0; }
-    .card { padding: 22px 0 24px; border-bottom: 1px solid var(--line); }
-    .meta { display: flex; align-items: center; gap: 12px; font: 10px ui-monospace, Consolas, monospace; letter-spacing: 1.1px; color: var(--muted); text-transform: uppercase; }
-    .meta .number { border: 1px solid #425247; border-radius: 50%; width: 28px; height: 28px; display: grid; place-items: center; color: var(--green); }
-    .meta time { color: var(--text); }
-    .phase { display: inline-flex; margin: 16px 0 10px; color: var(--green); border: 1px solid #385140; padding: 3px 9px; font: 9px/1.5 ui-monospace, Consolas, monospace; letter-spacing: 1px; text-transform: uppercase; }
-    .phase.risk { color: var(--red); border-color: #624339; }
-    h2 { font-size: clamp(26px, 2.3vw, 38px); font-weight: 450; letter-spacing: -1.2px; line-height: 1.1; margin: 0 0 12px; }
-    .summary { color: #aebdb2; font-size: 14px; line-height: 1.75; margin: 0 0 14px; }
-    .row { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+    /* Labels in 3D (CSS2DRenderer) */
+    .label-layer { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .tk { font: 600 10px ui-monospace, Consolas, monospace; color: #fff; text-shadow: 0 0 3px #000, 0 0 6px #000; letter-spacing: .5px; white-space: nowrap; transform: translateY(-8px); }
+    .tk.dim { opacity: .55; }
+    .sec { font: 11px/1 -apple-system, "Segoe UI", sans-serif; letter-spacing: 3px; text-transform: uppercase; color: #fff;
+      text-shadow: 0 0 4px #000, 0 0 10px #000; white-space: nowrap; opacity: .85; }
+
+    /* Side panel */
+    .story { border-left: 1px solid var(--line); overflow-y: auto; padding: 4px 26px 24px; min-height: 0; }
+    .card { padding: 20px 0; border-bottom: 1px solid var(--line); }
+    .meta { display: flex; gap: 10px; color: var(--muted); }
+    .meta .date { color: var(--text); }
+    .phase { display: inline-block; margin: 12px 0 8px; color: var(--accent); }
+    .phase.risk { color: var(--red); }
+    h2 { font-size: 24px; font-weight: 400; letter-spacing: -.6px; line-height: 1.15; margin: 0 0 10px; }
+    .row { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
     .row .k { color: var(--muted); }
     .row .v { font-variant-numeric: tabular-nums; text-align: right; }
-    #mood { margin-top: 10px; font: 11px/1.7 ui-monospace, Consolas, monospace; color: var(--red); }
-    #info { display: none; }
-    #info .close, .card-close { float: right; background: none; border: 1px solid var(--line2); border-radius: 50%; width: 28px; height: 28px; color: var(--muted); }
-    #ai { margin-top: 14px; font-size: 14px; line-height: 1.7; color: #d4dfd4; }
-    #ai .label, .ai-label { display: block; font: 9px ui-monospace, Consolas, monospace; letter-spacing: 1.3px; color: var(--muted); text-transform: uppercase; margin-bottom: 4px; }
-    .outcome { padding: 14px 0; border-top: 1px solid var(--line); display: grid; grid-template-columns: 26px 1fr; gap: 8px; }
-    .outcome .symbol { color: var(--green); font-size: 22px; line-height: 1; }
-    .outcome.bad .symbol { color: var(--red); }
-    .outcome h3 { font: 10px ui-monospace, Consolas, monospace; letter-spacing: 1.4px; color: var(--green); margin: 0 0 6px; }
+    #mood { margin-top: 8px; color: var(--red); }
+    #info, #tour { display: none; }
+    .close { float: right; background: none; border: 0; color: var(--muted); font-size: 18px; line-height: 1; }
+    #ai { margin-top: 12px; font-size: 13px; line-height: 1.65; color: #d6d6d6; }
+    #ai .label, .ai-label { display: block; margin-bottom: 4px; color: var(--dim); }
+    .summary { color: #bdbdbd; font-size: 13px; line-height: 1.65; margin: 0 0 10px; }
+    #tourText { margin: 4px 0 0; font-size: 13px; line-height: 1.65; color: #d6d6d6; }
+    .outcome { padding: 10px 0; border-top: 1px solid var(--line); font-size: 12.5px; line-height: 1.6; color: #b0b0b0; }
+    .outcome h3 { margin: 0 0 4px; color: var(--accent); font-weight: 400; }
     .outcome.bad h3 { color: var(--red); }
-    .outcome p { font-size: 13px; line-height: 1.7; margin: 0; color: #b8c4bb; }
     .outcome strong { color: var(--text); font-weight: 500; }
-    .source { margin-top: 10px; font: 10px/1.7 ui-monospace, Consolas, monospace; color: var(--muted); }
-    .source a { text-decoration: none; border-bottom: 1px solid #526154; }
-    #tour { display: none; }
-    #tourText { margin: 6px 0 0; font-size: 14px; line-height: 1.7; color: #d4dfd4; }
-    .nav { display: flex; gap: 8px; margin-top: 16px; }
-    .nav button { background: none; border: 1px solid var(--line2); border-radius: 4px; padding: 6px 12px; font-size: 12px; }
-    .nav button.primary { background: var(--green); color: #112819; border-color: var(--green); }
-    .keys { font: 10px/1.8 ui-monospace, Consolas, monospace; color: var(--muted); }
-    .story footer { padding-top: 26px; font: italic 22px/1.3 Georgia, serif; color: var(--green); }
-    .story footer span { display: block; font: 11px/1.9 -apple-system, "Segoe UI", sans-serif; color: var(--muted); margin-top: 14px; }
+    .source { margin-top: 8px; color: var(--dim); }
+    .source a { text-decoration: none; border-bottom: 1px solid var(--line2); }
+    .nav { display: flex; gap: 8px; margin-top: 14px; }
+    .nav button { background: none; border: 1px solid var(--line2); border-radius: 15px; padding: 4px 12px; font-size: 12px; color: var(--muted); }
+    .nav button:hover { color: var(--text); }
+    .fine { margin-top: 18px; color: var(--dim); font-size: 10.5px; line-height: 1.7; }
+    .fine a { text-decoration: none; border-bottom: 1px solid var(--line2); }
 
     /* Timebar */
-    .timebar { position: fixed; bottom: 0; left: 0; right: 0; z-index: 10; height: var(--timebar); display: flex; align-items: center; gap: 24px;
-      background: #0d1915f5; border-top: 1px solid #33463a; padding: 0 3%; backdrop-filter: blur(18px); }
-    #play { background: var(--green); color: #112819; border: 0; border-radius: 4px; padding: 12px 16px; font-size: 12px; white-space: nowrap; min-width: 128px; }
-    .scrubber { flex: 1; padding-top: 14px; }
-    #slider { width: 100%; margin: 0; accent-color: var(--green); height: 4px; cursor: pointer; }
-    #ticks { position: relative; height: 18px; margin-top: 8px; }
-    #ticks button { position: absolute; transform: translateX(-50%); padding: 0; background: none; border: 0; color: #92a496; font: 10px ui-monospace, Consolas, monospace; }
-    #ticks button.current { color: var(--green); }
-    .date-readout { display: flex; flex-direction: column; font: 11px ui-monospace, Consolas, monospace; gap: 4px; min-width: 104px; }
-    .date-readout small { font-size: 9px; color: var(--muted); }
-    #tourBtn { border: 1px solid var(--line2); background: none; border-radius: 4px; padding: 10px 14px; font-size: 12px; white-space: nowrap; }
-    .arrows { display: flex; gap: 8px; }
-    .arrows button { border: 1px solid #4d6252; background: none; border-radius: 50%; height: 38px; width: 38px; font-size: 18px; }
-    .arrows button:last-child { background: var(--green); color: #14271b; border-color: var(--green); }
+    .timebar { position: fixed; bottom: 0; left: 0; right: 0; height: var(--timebar); display: flex; align-items: center; gap: 20px;
+      background: #000; border-top: 1px solid var(--line); padding: 0 22px; }
+    #play { background: var(--text); color: #000; border: 0; border-radius: 16px; padding: 6px 14px; font-size: 12px; white-space: nowrap; }
+    .scrubber { flex: 1; padding-top: 12px; }
+    #slider { width: 100%; margin: 0; accent-color: #d9d9d9; height: 3px; cursor: pointer; }
+    #ticks { position: relative; height: 16px; margin-top: 6px; }
+    #ticks button { position: absolute; transform: translateX(-50%); padding: 0; background: none; border: 0; color: var(--dim); font: 10px ui-monospace, Consolas, monospace; }
+    #ticks button.current { color: var(--text); }
+    .date-readout { display: flex; flex-direction: column; min-width: 100px; }
+    #sliderDate { color: var(--text); } #counter { color: var(--dim); }
+    #tourBtn { border: 1px solid var(--line2); background: none; border-radius: 16px; padding: 6px 14px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+    #tourBtn:hover { color: var(--text); }
+    .arrows { display: flex; gap: 6px; }
 
-    dialog { background: #122019; color: var(--text); border: 1px solid var(--line2); border-radius: 10px; padding: 36px; width: 560px; max-width: 90vw; max-height: 85svh; }
-    dialog::backdrop { background: #000a; }
-    dialog h2 { margin-top: 10px; }
-    .guide-row { display: grid; grid-template-columns: 130px 1fr; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); font-size: 13px; }
-    .guide-row b { color: var(--green); font-weight: 500; }
-    .guide-row span { color: #b8c4bb; }
-    dialog .close { position: absolute; top: 14px; right: 16px; background: none; border: 0; color: var(--muted); font-size: 22px; }
+    dialog { background: #0a0a0a; color: var(--text); border: 1px solid var(--line2); border-radius: 8px; padding: 30px; width: 520px; max-width: 90vw; max-height: 85svh; }
+    dialog::backdrop { background: #000c; }
+    .guide-row { display: grid; grid-template-columns: 120px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 13px; }
+    .guide-row b { font-weight: 500; }
+    .guide-row span { color: #b0b0b0; }
+    .swatch { display: inline-block; width: 36px; height: 5px; border-radius: 3px; vertical-align: middle; background: linear-gradient(90deg, #ff3030, #ffd23a, #2fe36a); }
 
     @media (max-width: 900px) {
       body { overflow: auto; }
-      header { flex-wrap: wrap; height: auto; padding: 10px 16px; }
-      #about { display: none; }
       main { display: block; height: auto; padding-bottom: var(--timebar); }
-      .observatory { height: 70svh; border-right: 0; padding: 12px 16px; }
-      .observatory h1 { display: none; }
-      .story { padding: 0 16px 40px; overflow: visible; }
+      .planet-wrap { height: 72svh; }
+      .story { border-left: 0; overflow: visible; }
+      #tourBtn, #counter, #ticks, .date-form { display: none; }
       .timebar { gap: 10px; padding: 0 12px; }
-      #tourBtn, .date-readout small, #ticks { display: none; }
-      #play { min-width: 0; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <div class="brand"><span class="brand-icon">◈</span> MARKET WORLDS</div>
-    <form id="dateForm" class="date-form">
-      <label for="jumpDate">TRAVEL TO A DATE</label>
-      <div><input id="jumpDate" type="date" required /><button type="submit">Explore →</button></div>
-    </form>
-    <button id="about">How to read this world <span>↗</span></button>
-  </header>
-
   <main>
-    <section class="observatory" aria-label="Interactive market planet">
-      <div class="eyebrow"><span class="dot"></span> 20 years of real market data · 30 companies · 6 sectors</div>
-      <h1>Same market. <em>Different worlds.</em></h1>
-      <div class="planet-wrap">
-        <canvas id="scene" tabindex="0" aria-label="3D planet built from stock market data. Drag to rotate, scroll to zoom, click a mountain for details."></canvas>
-        <span class="coordinate">WEEK <b id="weekNo">—</b> / <span id="weekTotal">—</span></span>
-        <span class="planet-tag" id="planetTag">—</span>
-        <div class="view-controls">
-          <button id="zoomOut" aria-label="Zoom out">−</button>
-          <button id="zoomIn" aria-label="Zoom in">+</button>
-          <button id="rotate" aria-label="Pause rotation" aria-pressed="false">Ⅱ</button>
-        </div>
+    <section class="planet-wrap" aria-label="Interactive market planet">
+      <canvas id="scene" tabindex="0" aria-label="3D planet built from stock market data. Drag to rotate, scroll to zoom, click a mountain for details."></canvas>
+      <div class="label-layer" id="labels"></div>
+      <div class="overlay tl mono">Week <b id="weekNo">—</b> / <span id="weekTotal">—</span></div>
+      <div class="overlay tr">
+        <form id="dateForm" class="date-form"><label for="jumpDate" class="mono" style="position:absolute;left:-9999px">Travel to a date</label>
+          <input id="jumpDate" type="date" required title="Travel to a date" /><button type="submit">Go</button></form>
+        <button class="round" id="about" aria-label="How to read this world">?</button>
       </div>
-      <div class="world-caption"><span id="weather"><span class="dot"></span> —</span><span>Drag to explore ↔</span></div>
-      <div class="legend">
-        <span><i style="background:#2fe36a"></i>Mountain up this week</span>
-        <span><i style="background:#ff3030"></i>Mountain down</span>
-        <span>Height = growth since 2007</span>
-        <span>Continent = sector</span>
+      <div class="overlay bl mono"><span id="planetTag">—</span> · <span id="weather">—</span></div>
+      <div class="overlay br">
+        <button class="round" id="zoomOut" aria-label="Zoom out">−</button>
+        <button class="round" id="zoomIn" aria-label="Zoom in">+</button>
+        <button class="round" id="rotate" aria-label="Pause rotation" aria-pressed="false">Ⅱ</button>
       </div>
     </section>
 
-    <div class="story" id="story">
+    <aside class="story" id="story">
       <article id="tour" class="card" aria-live="polite">
-        <button class="card-close" id="tourExit" aria-label="Exit tour">×</button>
-        <div class="meta"><span class="number" id="tourNum">01</span><time id="tourDate"></time><span id="tourStep"></span></div>
-        <div class="phase" id="tourPhase"></div>
+        <button class="close" id="tourExit" aria-label="Exit tour">×</button>
+        <div class="meta mono"><span id="tourNum">01</span><span class="date" id="tourDate"></span><span id="tourStep"></span></div>
+        <div class="phase mono" id="tourPhase"></div>
         <h2 id="tourTitle"></h2>
         <p class="summary" id="tourSummary"></p>
-        <span class="ai-label" id="tourLabel"></span>
+        <span class="ai-label mono" id="tourLabel"></span>
         <p id="tourText"></p>
         <div id="tourOutcomes"></div>
-        <div class="source" id="tourSource"></div>
-        <div class="nav"><button id="tourPrev">← Previous</button><button id="tourNext" class="primary">Next stop →</button></div>
+        <div class="source mono" id="tourSource"></div>
+        <div class="nav"><button id="tourPrev">← Prev</button><button id="tourNext">Next →</button></div>
       </article>
 
       <article id="week" class="card">
-        <div class="meta"><span class="number">◈</span><time id="date">—</time><span>This week</span></div>
-        <div class="phase" id="phase">—</div>
+        <div class="meta mono"><span class="date" id="date">—</span></div>
+        <div class="phase mono" id="phase">—</div>
         <h2 id="headline">—</h2>
-        <div class="row"><span class="k">Market fear (VIX)</span><span class="v" id="vix">—</span></div>
+        <div class="row"><span class="k">Fear (VIX)</span><span class="v" id="vix">—</span></div>
         <div class="row"><span class="k">Sector correlation</span><span class="v" id="corr">—</span></div>
-        <div class="row"><span class="k">Market this week</span><span class="v" id="mret">—</span></div>
-        <div id="mood"></div>
+        <div class="row"><span class="k">Market</span><span class="v" id="mret">—</span></div>
+        <div id="mood" class="mono"></div>
       </article>
 
       <article id="info" class="card">
         <button class="close" id="infoClose" aria-label="Close">×</button>
-        <div class="eyebrow">Selected</div>
-        <h2 id="infoTitle" style="margin-top:10px"></h2>
-        <div class="meta" id="infoSub"></div>
-        <div id="infoRows" style="margin-top:12px"></div>
+        <h2 id="infoTitle"></h2>
+        <div class="meta mono" id="infoSub"></div>
+        <div id="infoRows" style="margin-top:10px"></div>
         <div id="ai"></div>
       </article>
 
-      <article class="card">
-        <div class="eyebrow">How to explore</div>
-        <p class="summary" style="margin-top:10px">Click a mountain (a company) or a continent (a sector) for its numbers and an explanation. Press <b>Play history</b> to watch twenty years pass, or <b>Take the tour</b>.</p>
-        <div class="keys" id="keys">Space play · ←/→ week · Shift+←/→ year · 1–9 tour stops · Esc close</div>
-      </article>
-
-      <footer>Every crisis looks different. The pattern is the same.
-        <span id="disclaimer">For exploration and education — not financial advice.<br>
-          Data: Yahoo Finance via yfinance, 2007–2026. Heights use price growth, not market cap; today's large companies (survivorship bias).<br>
-          Planet shader by <a href="https://github.com/jsulpis/realtime-planet-shader" target="_blank" rel="noopener noreferrer">Julien Sulpis</a>
-          (<a href="licenses/realtime-planet-shader.txt">GPL-3.0</a>), adapted by Gareth Menezes; volcano profile from
-          <a href="https://github.com/Jaysmito101/TerraForge3D" target="_blank" rel="noopener noreferrer">TerraForge3D</a> (<a href="licenses/TerraForge3D.txt">MIT</a>).</span>
-      </footer>
-    </div>
+      <div class="fine">For exploration and education — not financial advice.<br>
+        Planet shader: <a href="https://github.com/jsulpis/realtime-planet-shader" target="_blank" rel="noopener noreferrer">Julien Sulpis</a>
+        (<a href="licenses/realtime-planet-shader.txt">GPL-3.0</a>), adapted by Gareth Menezes ·
+        <a href="https://github.com/Jaysmito101/TerraForge3D" target="_blank" rel="noopener noreferrer">TerraForge3D</a> (<a href="licenses/TerraForge3D.txt">MIT</a>)</div>
+    </aside>
   </main>
 
   <nav class="timebar" aria-label="Timeline">
-    <button id="play" aria-label="Play">▶ Play history</button>
+    <button id="play" aria-label="Play">▶ Play</button>
     <div class="scrubber">
-      <label class="mono" for="slider" style="position:absolute;left:-9999px">Week</label>
+      <label for="slider" style="position:absolute;left:-9999px">Week</label>
       <input id="slider" type="range" min="0" max="0" value="0" />
       <div id="ticks"></div>
     </div>
-    <div class="date-readout"><span id="sliderDate">—</span><small id="counter">—</small></div>
-    <button id="tourBtn">Take the tour</button>
-    <div class="arrows"><button id="prevStop" aria-label="Previous tour stop">↑</button><button id="nextStop" aria-label="Next tour stop">↓</button></div>
+    <div class="date-readout mono"><span id="sliderDate">—</span><span id="counter">—</span></div>
+    <button id="tourBtn">Tour</button>
+    <div class="arrows"><button class="round" id="prevStop" aria-label="Previous tour stop">↑</button><button class="round" id="nextStop" aria-label="Next tour stop">↓</button></div>
   </nav>
 
   <dialog id="aboutDialog">
     <button class="close" id="closeAbout" aria-label="Close">×</button>
-    <div class="eyebrow">The explorer's field guide</div>
-    <h2>Every feature<br>is a real number.</h2>
-    <div class="guide-row"><b>Continents</b><span>Six sectors, five large US companies each. Each continent has its own colour.</span></div>
-    <div class="guide-row"><b>Mountains</b><span>One per company. Height is price growth since 2007 on a log scale. Colour is this week's return <span class="swatch"></span> red down, green up; bigger moves glow.</span></div>
-    <div class="guide-row"><b>Continental drift</b><span>Average correlation between sectors over 30 trading days. Calm markets: sectors move independently and continents spread out. Crises: everything falls together and they collide into a supercontinent — diversification fails when it is needed most.</span></div>
-    <div class="guide-row"><b>Weather</b><span>Market fear (VIX). Higher fear brings storm fronts, a red atmosphere, a dimmer sun, and lightning above 40.</span></div>
-    <div class="guide-row"><b>Volcanoes &amp; quakes</b><span>Weeks when the average stock fell more than 7%. The planet shakes and volcanoes erupt on the two sectors that fell hardest.</span></div>
-    <div class="guide-row"><b>AI explorer's log</b><span>Explanations generated by AI from only the numbers shown, labelled as such. Without a connection, a summary is built from the data.</span></div>
-    <div class="guide-row"><b>Limits</b><span>Price growth, not market cap. Today's big companies, so survivors only. Not a trading tool, not financial advice.</span></div>
+    <h2>Every feature is a real number.</h2>
+    <div class="guide-row"><b>Continents</b><span>Six sectors, five large US companies each. Name shown on the continent.</span></div>
+    <div class="guide-row"><b>Mountains</b><span>One per company, ticker above the peak. Height = price growth since 2007 (log scale). Glow at the foot = this week's return <span class="swatch"></span> red down, green up.</span></div>
+    <div class="guide-row"><b>Drift</b><span>Correlation between sectors. Calm: continents spread out. Crisis: they collide into a supercontinent — diversification fails when it is needed most.</span></div>
+    <div class="guide-row"><b>Weather</b><span>Market fear (VIX): storms, red atmosphere, dimmer sun; lightning above 40.</span></div>
+    <div class="guide-row"><b>Volcanoes</b><span>Weeks when stocks fell over 7% on average, on the two hardest-hit sectors. The planet shakes.</span></div>
+    <div class="guide-row"><b>Keys</b><span>Space play · ←/→ week · Shift+←/→ year · 1–9 tour stops · Esc close</span></div>
+    <div class="guide-row"><b>Limits</b><span>Price growth, not market cap. Today's big companies (survivorship bias). Not financial advice.</span></div>
   </dialog>
 
   <script type="module" src="/main.js"></script>

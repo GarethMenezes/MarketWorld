@@ -7,6 +7,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import planetFragment from './shaders/planet.frag.glsl?raw';
+import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
 // Tuned on real data 2007–2026 (see check_world.py output).
@@ -15,7 +16,7 @@ const CONFIG = {
 
   // Mountain height = growth since 2007 on a log scale:
   //   h = base + perDecade * log10(growth), clamped, then * worldScale
-  height: { base: 0.6, perDecade: 0.7, min: 0.12, max: 3, worldScale: 0.45 },
+  height: { base: 0.6, perDecade: 0.7, min: 0.12, max: 3, worldScale: 0.3 },
 
   // Mountain colour: t = weeklyReturn * colorSensitivity, clamped to [-1, 1]
   //   -1 red · 0 yellow · +1 green.  20 → a 5% weekly move is full colour.
@@ -37,7 +38,7 @@ const CONFIG = {
   weekMs: 120,                                  // playback speed: ms per trading week
   smoothing: 4,                                 // higher = visuals follow data faster
   autoRotateSpeed: 0.35,
-  tour: { flySeconds: 2, marketDistance: 16, focusDistance: 12 },
+  tour: { flySeconds: 2, marketDistance: 15, focusDistance: 11 },
 
   // Performance: render-resolution cap. Measured on Intel Arc iGPU at 2008-10-10:
   // 1.0 → 6.3 ms/frame, 1.5 → 8.6 ms, 2.0 → 13.8 ms. 1.5 keeps 60 fps with headroom.
@@ -63,20 +64,23 @@ renderer.setPixelRatio(Math.min(window.devicePixelRatio, CONFIG.maxPixelRatio));
 // The canvas lives in the left column (Gareth's layout), so size everything from it
 const viewSize = () => [Math.max(1, canvas.clientWidth), Math.max(1, canvas.clientHeight)];
 renderer.setSize(...viewSize(), false);
+// HTML labels (tickers, sector names) drawn over the canvas
+const labelRenderer = new CSS2DRenderer({ element: document.getElementById('labels') });
+labelRenderer.setSize(...viewSize());
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 
 const scene = new THREE.Scene();
-const SKY_CALM = new THREE.Color('#02040a');
-const SKY_STORM = new THREE.Color('#2a0508');
+const SKY_CALM = new THREE.Color('#000000');
+const SKY_STORM = new THREE.Color('#120203');
 scene.background = SKY_CALM.clone();
 
 const camera = new THREE.PerspectiveCamera(45, viewSize()[0] / viewSize()[1], 0.1, 500);
-camera.position.set(0, 5, 17);
+camera.position.set(0, 3.2, 15); // planet fills the view
 
 const controls = new OrbitControls(camera, canvas);
 controls.enableDamping = true;
-controls.minDistance = 7.5;
+controls.minDistance = 7;
 controls.maxDistance = 35;
 controls.autoRotate = true;
 controls.autoRotateSpeed = CONFIG.autoRotateSpeed;
@@ -264,19 +268,82 @@ function makeContinentGeometry(seed, tint, lift) {
   return g;
 }
 
-// Low-poly rocky mountain, base at y=0, height 1
+// Realistic mountain: ridged fractal noise on a radial profile, rock/scree/snow vertex
+// colours, smooth normals. Base at y=0, peak at y=1 (scaled by the data), skirt below ground.
+const MOUNTAIN_RADIUS = 0.42;
 function makeMountainGeometry(seed) {
-  const g = new THREE.ConeGeometry(0.24, 1, 7, 3);
-  g.translate(0, 0.5, 0);
-  const p = g.attributes.position;
-  for (let i = 0; i < p.count; i++) {
-    const y = p.getY(i);
-    if (y > 0.99) continue; // keep the peak
-    const j = (hash3(i, seed, 7) - 0.5) * 0.09 * (1 - y);
-    p.setXYZ(i, p.getX(i) * (1 + j * 3), y + (hash3(i, seed, 3) - 0.5) * 0.06 * y, p.getZ(i) * (1 + j * 3));
+  const RINGS = 26, SEGS = 72;
+  const pos = [], col = [], idx = [];
+  const rock = new THREE.Color('#8a7663'), scree = new THREE.Color('#4b3c31'), snow = new THREE.Color('#f1f3f6');
+  const c = new THREE.Color();
+  // Ridged multifractal (Musgrave): each octave is weighted by the one before, so sharp
+  // ridges and gullies form along the crests — the classic procedural-terrain look.
+  const ridgedMF = (x, z) => {
+    let sum = 0, amp = 0.55, f = 2.6, w = 1;
+    for (let o = 0; o < 5; o++) {
+      let n = 1 - Math.abs(noise3(x * f + seed, z * f - seed, seed * 0.31 + o * 7.7) * 2 - 1);
+      n *= n * w;
+      w = Math.min(1, n * 1.8);
+      sum += n * amp;
+      f *= 2.1; amp *= 0.5;
+    }
+    return sum;
+  };
+  const h = (r, th) => {
+    const x = Math.cos(th) * r, z = Math.sin(th) * r;
+    const dome = Math.pow(Math.max(0, 1 - r * r), 1.25);   // broad massif, not a cone
+    return dome * (0.18 + ridgedMF(x, z)) + dome * dome * 0.25;  // central summit stays highest
+  };
+  const heights = [];
+  heights.push(h(0, 0));
+  for (let i = 1; i <= RINGS; i++) for (let j = 0; j < SEGS; j++) heights.push(h(i / RINGS, (j / SEGS) * Math.PI * 2));
+  const peak = Math.max(...heights);
+  const push = (r, th, y) => {
+    const ny = y / peak;
+    pos.push(Math.cos(th) * r * MOUNTAIN_RADIUS, ny, Math.sin(th) * r * MOUNTAIN_RADIUS);
+    const n = fbm3(Math.cos(th) * r * 6 + seed, ny * 4, Math.sin(th) * r * 6, 2);
+    if (ny > 0.68 + (n - 0.5) * 0.25) c.copy(snow);
+    else c.copy(scree).lerp(rock, Math.min(1, ny * 1.4 + (n - 0.5) * 0.4));
+    col.push(c.r, c.g, c.b);
+  };
+  push(0, 0, heights[0]);
+  let k = 1;
+  for (let i = 1; i <= RINGS; i++) for (let j = 0; j < SEGS; j++) push(i / RINGS, (j / SEGS) * Math.PI * 2, heights[k++]);
+  for (let j = 0; j < SEGS; j++) push(1.08, (j / SEGS) * Math.PI * 2, -0.25 * peak); // skirt into the ground
+  for (let j = 0; j < SEGS; j++) idx.push(0, 1 + ((j + 1) % SEGS), 1 + j);
+  for (let i = 1; i <= RINGS; i++) {
+    const a0 = 1 + (i - 1) * SEGS, a1 = 1 + i * SEGS;
+    for (let j = 0; j < SEGS; j++) {
+      const jn = (j + 1) % SEGS;
+      idx.push(a0 + j, a0 + jn, a1 + j, a0 + jn, a1 + jn, a1 + j);
+    }
   }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
   g.computeVertexNormals();
-  return g.toNonIndexed();
+  return g;
+}
+
+// Glowing ring at each mountain's foot: colour = this week's return (red/yellow/green)
+const footRingGeometry = new THREE.RingGeometry(MOUNTAIN_RADIUS * 1.0, MOUNTAIN_RADIUS * 1.14, 48).rotateX(-Math.PI / 2);
+
+// Company names for labels and the info card
+const COMPANY = {
+  AAPL: 'Apple', MSFT: 'Microsoft', NVDA: 'NVIDIA', GOOGL: 'Alphabet', ORCL: 'Oracle',
+  JPM: 'JPMorgan Chase', BAC: 'Bank of America', GS: 'Goldman Sachs', MS: 'Morgan Stanley', WFC: 'Wells Fargo',
+  XOM: 'ExxonMobil', CVX: 'Chevron', COP: 'ConocoPhillips', SLB: 'SLB', OXY: 'Occidental',
+  JNJ: 'Johnson & Johnson', PFE: 'Pfizer', UNH: 'UnitedHealth', MRK: 'Merck', ABT: 'Abbott',
+  AMZN: 'Amazon', WMT: 'Walmart', KO: 'Coca-Cola', PG: 'Procter & Gamble', MCD: "McDonald's",
+  CAT: 'Caterpillar', BA: 'Boeing', DE: 'Deere', UPS: 'UPS', LMT: 'Lockheed Martin',
+};
+function makeLabel(text, cls, title) {
+  const el = document.createElement('div');
+  el.className = cls;
+  el.textContent = text;
+  if (title) el.title = title;
+  return new CSS2DObject(el);
 }
 
 // ───────────────────────────── DATA → WORLD ─────────────────────────────
@@ -296,6 +363,9 @@ const continents = data.sectors.map((sector, i) => {
   const land = new THREE.Mesh(makeContinentGeometry(seed, tint, i * 0.004),
     new THREE.MeshBasicMaterial({ visible: false }));
   planetUniforms.uContinentColor.value[i].set(tint);
+  const sectorLabel = makeLabel(sector.name, 'sec');
+  sectorLabel.position.set(0, 0, R + 0.25); // continent centre (mountains ring around it)
+  group.add(sectorLabel);
   land.userData.sector = sector.name;
   group.add(land);
   world.add(group);
@@ -309,18 +379,26 @@ const continents = data.sectors.map((sector, i) => {
     const theta = (k / sector.tickers.length) * Math.PI * 2 + i;
     const angle = 0.17 + 0.03 * hash3(k, i, 1);
     const d = localDir(angle, theta, new THREE.Vector3());
-    const mat = new THREE.MeshStandardMaterial({ color: '#ffd23a', roughness: 0.7, flatShading: true,
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0,
       emissive: '#000000', emissiveIntensity: 1 });
-    const mesh = new THREE.Mesh(makeMountainGeometry(k + i * 10), mat);
+    const mesh = new THREE.Mesh(makeMountainGeometry(k * 7.3 + i * 31.1), mat);
+    const ring = new THREE.Mesh(footRingGeometry, new THREE.MeshBasicMaterial({
+      color: '#ffd23a', transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    ring.position.copy(d).multiplyScalar(R + 0.012);
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+    group.add(ring);
+    const label = makeLabel(ticker, 'tk', COMPANY[ticker]);
+    label.position.set(0, 1.08, 0); // just above the peak; follows the mountain's height
+    mesh.add(label);
     mesh.position.copy(d).multiplyScalar(R - 0.02); // shader surface is a sphere of radius R
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
-    mesh.userData = { ticker, sector: sector.name, stock: stockIndex[ticker], height: 0.2, targetHeight: 0.2,
+    mesh.userData = { ticker, sector: sector.name, stock: stockIndex[ticker], height: 0.2, targetHeight: 0.2, ring, label,
       color: new THREE.Color('#888888'), targetColor: new THREE.Color('#888888'), glow: 0, targetGlow: 0 };
     mesh.scale.set(1, 0.2, 1);
     group.add(mesh);
     return mesh;
   });
-  return { sector, group, land, qAz, home, mountains };
+  return { sector, group, land, qAz, home, mountains, sectorLabel };
 });
 const allMountains = continents.flatMap((c) => c.mountains);
 const pickables = [...allMountains, ...continents.map((c) => c.land)];
@@ -329,6 +407,7 @@ const pickables = [...allMountains, ...continents.map((c) => c.land)];
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 const RED = new THREE.Color('#ff3030'), YELLOW = new THREE.Color('#ffd23a'), GREEN = new THREE.Color('#2fe36a');
 const GREY = new THREE.Color('#777777');
+const WHITE = new THREE.Color('#ffffff');
 
 function heightFromGrowth(g) { // log scale: ×10 growth adds perDecade
   const h = CONFIG.height;
@@ -473,8 +552,8 @@ function updateInfoPanel() {
   $('info').style.display = 'block';
   if (sel.ticker) {
     const s = stockIndex[sel.ticker];
-    $('infoTitle').textContent = sel.ticker;
-    $('infoSub').textContent = `${s.sector} · week of ${fmtDate(data.dates[i])}`;
+    $('infoTitle').textContent = `${COMPANY[sel.ticker] ?? sel.ticker}`;
+    $('infoSub').textContent = `${sel.ticker} · ${s.sector} · ${fmtDate(data.dates[i])}`;
     $('infoRows').innerHTML =
       row('Growth since 2007', s.growth[i] == null ? '—' : `×${s.growth[i].toFixed(2)}`) +
       row('This week', `<span class="${cls(s.ret[i])}">${pct(s.ret[i])}</span>`) +
@@ -483,7 +562,7 @@ function updateInfoPanel() {
   } else {
     const s = data.sectors.find((x) => x.name === sel.sector);
     $('infoTitle').textContent = s.name;
-    $('infoSub').textContent = `Sector · week of ${fmtDate(data.dates[i])}`;
+    $('infoSub').textContent = `Sector · ${fmtDate(data.dates[i])}`;
     $('infoRows').innerHTML =
       row('Companies', s.tickers.join(', ')) +
       row('This week (average)', `<span class="${cls(s.ret[i])}">${pct(s.ret[i])}</span>`) +
@@ -529,7 +608,7 @@ $('infoClose').addEventListener('click', () => select(null));
 function setPlaying(p) {
   state.playing = p;
   if (p && state.week >= N - 1) setWeek(0, { quake: false });
-  playBtn.textContent = p ? '❚❚ Pause' : '▶ Play history';
+  playBtn.textContent = p ? '❚❚ Pause' : '▶ Play';
   playBtn.setAttribute('aria-label', p ? 'Pause' : 'Play');
   controls.autoRotate = !p && !state.touring && !state.rotationPaused; // still while playing/touring
   if (!p) requestExplanation();
@@ -687,6 +766,7 @@ new ResizeObserver(() => {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h, false);
   composer.setSize(w, h);
+  labelRenderer.setSize(w, h);
 }).observe(canvas);
 
 // ───────────────────────────── ANIMATION ─────────────────────────────
@@ -695,6 +775,19 @@ const tmpQ = new THREE.Quaternion();
 const X = new THREE.Vector3(1, 0, 0);
 const FLASH_SKY = new THREE.Color('#3a3550');
 const tmpM4 = new THREE.Matrix4();
+
+// Labels only on the visible hemisphere, tickers only when reasonably close
+const labelPos = new THREE.Vector3(), toCam = new THREE.Vector3();
+function facing(obj) {
+  obj.getWorldPosition(labelPos);
+  toCam.copy(camera.position).sub(labelPos).normalize();
+  return labelPos.sub(world.position).normalize().dot(toCam) > 0.15;
+}
+function updateLabels() {
+  const close = camera.position.length() < 18;
+  for (const c of continents) c.sectorLabel.visible = facing(c.sectorLabel);
+  for (const m of allMountains) m.userData.label.visible = close && m.visible && facing(m.userData.label);
+}
 
 function animate() {
   const dt = Math.min(clock.getDelta(), 0.1);
@@ -723,11 +816,15 @@ function animate() {
   for (const m of allMountains) {
     const u = m.userData;
     u.height += (u.targetHeight - u.height) * k;
-    m.scale.y = u.height;
+    m.scale.set(0.7 + 0.6 * u.height, u.height, 0.7 + 0.6 * u.height); // big mountains are also broader
+    u.ring.scale.setScalar(0.7 + 0.6 * u.height);
     u.color.lerp(u.targetColor, k);
     u.glow += (u.targetGlow - u.glow) * k;
-    m.material.color.copy(u.color);
-    m.material.emissive.copy(u.color).multiplyScalar(u.glow);
+    m.material.color.copy(WHITE).lerp(u.color, 0.08);             // natural rock; the return shows in the foot ring
+    m.material.emissive.copy(u.color).multiplyScalar(u.glow * 0.06);
+    u.ring.material.color.copy(u.color);                          // the clear signal: glowing foot ring
+    u.ring.material.opacity = 0.15 + 0.6 * Math.min(1, u.glow);
+    u.ring.visible = m.visible;
   }
 
   // Weather: VIX → sky colour, atmosphere, clouds, sunlight
@@ -777,7 +874,9 @@ function animate() {
 
   updateFly(dt);
   controls.update(dt);
+  updateLabels();
   composer.render(dt);
+  labelRenderer.render(scene, camera);
   requestAnimationFrame(animate);
 }
 
