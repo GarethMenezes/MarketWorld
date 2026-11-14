@@ -1,0 +1,220 @@
+{
+ "sectors": [
+  "Technology",
+  "Financials",
+  "Energy",
+  "Healthcare",
+  "Consumer",
+  "Industrials"
+ ],
+ "calmVix": 20,
+ "crisisVix": 30,
+ "regimes": {
+  "calm": {
+   "days": 4152,
+   "beta": {
+    "Technology": {
+     "Technology": 1.0,
+     "Financials": 0.624,
+     "Energy": 0.389,
+     "Healthcare": 0.5,
+     "Consumer": 0.486,
+     "Industrials": 0.622
+    },
+    "Financials": {
+     "Technology": 0.264,
+     "Financials": 1.0,
+     "Energy": 0.249,
+     "Healthcare": 0.19,
+     "Consumer": 0.22,
+     "Industrials": 0.395
+    },
+    "Energy": {
+     "Technology": 0.412,
+     "Financials": 0.625,
+     "Energy": 1.0,
+     "Healthcare": 0.388,
+     "Consumer": 0.418,
+     "Industrials": 0.516
+    },
+    "Healthcare": {
+     "Technology": 0.496,
+     "Financials": 0.446,
+     "Energy": 0.362,
+     "Healthcare": 1.0,
+     "Consumer": 0.441,
+     "Industrials": 0.466
+    },
+    "Consumer": {
+     "Technology": 0.62,
+     "Financials": 0.664,
+     "Energy": 0.503,
+     "Healthcare": 0.569,
+     "Consumer": 1.0,
+     "Industrials": 0.585
+    },
+    "Industrials": {
+     "Technology": 0.489,
+     "Financials": 0.734,
+     "Energy": 0.382,
+     "Healthcare": 0.37,
+     "Consumer": 0.361,
+     "Industrials": 1.0
+    }
+   },
+   "corr": {
+    "Technology": {
+     "Technology": 1.0,
+     "Financials": 0.406,
+     "Energy": 0.4,
+     "Healthcare": 0.498,
+     "Consumer": 0.549,
+     "Industrials": 0.551
+    },
+    "Financials": {
+     "Technology": 0.406,
+     "Financials": 1.0,
+     "Energy": 0.395,
+     "Healthcare": 0.291,
+     "Consumer": 0.382,
+     "Industrials": 0.539
+    },
+    "Energy": {
+     "Technology": 0.4,
+     "Financials": 0.395,
+     "Energy": 1.0,
+     "Healthcare": 0.375,
+     "Consumer": 0.459,
+     "Industrials": 0.444
+    },
+    "Healthcare": {
+     "Technology": 0.498,
+     "Financials": 0.291,
+     "Energy": 0.375,
+     "Healthcare": 1.0,
+     "Consumer": 0.501,
+     "Industrials": 0.416
+    },
+    "Consumer": {
+     "Technology": 0.549,
+     "Financials": 0.382,
+     "Energy": 0.459,
+     "Healthcare": 0.501,
+     "Consumer": 1.0,
+     "Industrials": 0.459
+    },
+    "Industrials": {
+     "Technology": 0.551,
+     "Financials": 0.539,
+     "Energy": 0.444,
+     "Healthcare": 0.416,
+     "Consumer": 0.459,
+     "Industrials": 1.0
+    }
+   }
+  },
+  "crisis": {
+   "days": 316,
+   "beta": {
+    "Technology": {
+     "Technology": 1.0,
+     "Financials": 1.39,
+     "Energy": 0.915,
+     "Healthcare": 0.617,
+     "Consumer": 0.768,
+     "Industrials": 1.03
+    },
+    "Financials": {
+     "Technology": 0.298,
+     "Financials": 1.0,
+     "Energy": 0.34,
+     "Healthcare": 0.185,
+     "Consumer": 0.252,
+     "Industrials": 0.408
+    },
+    "Energy": {
+     "Technology": 0.6,
+     "Financials": 1.037,
+     "Energy": 1.0,
+     "Healthcare": 0.477,
+     "Consumer": 0.597,
+     "Industrials": 0.831
+    },
+    "Healthcare": {
+     "Technology": 0.812,
+     "Financials": 1.134,
+     "Energy": 0.957,
+     "Healthcare": 1.0,
+     "Consumer": 0.77,
+     "Industrials": 0.949
+    },
+    "Consumer": {
+     "Technology": 0.91,
+     "Financials": 1.392,
+     "Energy": 1.079,
+     "Healthcare": 0.694,
+     "Consumer": 1.0,
+     "Industrials": 1.083
+    },
+    "Industrials": {
+     "Technology": 0.585,
+     "Financials": 1.079,
+     "Energy": 0.72,
+     "Healthcare": 0.409,
+     "Consumer": 0.519,
+     "Industrials": 1.0
+    }
+   },
+   "corr": {
+    "Technology": {
+     "Technology": 1.0,
+     "Financials": 0.644,
+     "Energy": 0.741,
+     "Healthcare": 0.708,
+     "Consumer": 0.836,
+     "Industrials": 0.776
+    },
+    "Financials": {
+     "Technology": 0.644,
+     "Financials": 1.0,
+     "Energy": 0.593,
+     "Healthcare": 0.458,
+     "Consumer": 0.593,
+     "Industrials": 0.663
+    },
+    "Energy": {
+     "Technology": 0.741,
+     "Financials": 0.593,
+     "Energy": 1.0,
+     "Healthcare": 0.675,
+     "Consumer": 0.803,
+     "Industrials": 0.773
+    },
+    "Healthcare": {
+     "Technology": 0.708,
+     "Financials": 0.458,
+     "Energy": 0.675,
+     "Healthcare": 1.0,
+     "Consumer": 0.731,
+     "Industrials": 0.623
+    },
+    "Consumer": {
+     "Technology": 0.836,
+     "Financials": 0.593,
+     "Energy": 0.803,
+     "Healthcare": 0.731,
+     "Consumer": 1.0,
+     "Industrials": 0.75
+    },
+    "Industrials": {
+     "Technology": 0.776,
+     "Financials": 0.663,
+     "Energy": 0.773,
+     "Healthcare": 0.623,
+     "Consumer": 0.75,
+     "Industrials": 1.0
+    }
+   }
+  }
+ }
+}

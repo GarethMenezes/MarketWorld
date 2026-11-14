@@ -4,8 +4,8 @@ Run:   uvicorn server.app:app --reload --port 8000
 Env:   ANTHROPIC_API_KEY  (optional; without it a template sentence is returned)
        LLM_MODEL          (default claude-sonnet-5-5)
 
-The server looks numbers up in public/world.json itself; it never trusts numbers
-from the client. It must never return an error to the demo: any failure falls back
+The server looks numbers up in the market's world file itself (public/markets.json lists
+them; US = public/world.json); it never trusts numbers from the client. It must never return an error to the demo: any failure falls back
 to a template built from the same numbers.
 """
 import json
@@ -16,11 +16,30 @@ from pathlib import Path
 from fastapi import FastAPI
 from pydantic import BaseModel
 
-WORLD = json.loads((Path(__file__).parent.parent / "public" / "world.json").read_text())
-DATES = WORLD["dates"]
-STOCKS = {s["ticker"]: s for s in WORLD["stocks"]}
-SECTORS = {s["name"]: s for s in WORLD["sectors"]}
-MARKET = WORLD["market"]
+PUBLIC = Path(__file__).parent.parent / "public"
+
+
+class MarketData:
+    """One planet's data (one market)."""
+    def __init__(self, world):
+        self.world = world
+        self.meta = world.get("meta", {"id": "us", "name": "United States", "fearLabel": "VIX"})
+        self.dates = world["dates"]
+        self.stocks = {s["ticker"]: s for s in world["stocks"]}
+        self.sectors = {s["name"]: s for s in world["sectors"]}
+        self.market = world["market"]
+
+
+_index = json.loads((PUBLIC / "markets.json").read_text()) if (PUBLIC / "markets.json").exists() \
+    else [{"id": "us", "world": "world.json"}]
+MARKETS = {m["id"]: MarketData(json.loads((PUBLIC / m["world"]).read_text(encoding="utf-8")))
+           for m in _index if (PUBLIC / m["world"]).exists()}
+US = MARKETS.get("us") or next(iter(MARKETS.values()))
+WORLD = US.world                     # kept for the US-only helpers (tours)
+
+
+def market_for(mid):
+    return MARKETS.get(mid or "us", US)
 
 MODEL = os.environ.get("LLM_MODEL", "claude-sonnet-5-5")
 TIMEOUT_S = 8
@@ -34,6 +53,7 @@ class ExplainRequest(BaseModel):
     ticker: str | None = None
     sector: str | None = None
     week: int
+    market: str = "us"
 
 
 # ───────────── numbers ─────────────
@@ -48,13 +68,17 @@ def fear_label(vix):
             else "stressed" if vix < 40 else "crisis level")
 
 
-def gather(ticker, sector, week, event=None):
-    """Collect the facts for this week from world.json. Returns (subject, facts dict)."""
+def gather(ticker, sector, week, event=None, mk=None):
+    """Collect the facts for this week from the market's data. Returns (subject, facts dict)."""
+    mk = mk or US
+    DATES, STOCKS, SECTORS, MARKET = mk.dates, mk.stocks, mk.sectors, mk.market
     week = max(0, min(len(DATES) - 1, week))
     facts = {
+        "market": mk.meta.get("name", "United States"),
         "week_ending": DATES[week],
         **({"known_as": event} if event else {}),
         "market_weekly_return": pct(MARKET["ret"][week]),
+        "fear_measure": mk.meta.get("fearLabel", "VIX"),
         "vix": MARKET["vix"][week],
         "vix_mood": fear_label(MARKET["vix"][week]),
         "avg_sector_correlation": MARKET["avgCorr"][week],
@@ -65,6 +89,7 @@ def gather(ticker, sector, week, event=None):
         g = s["growth"][week]
         facts.update({
             "ticker": ticker,
+            "company": s.get("name", ticker),
             "sector": s["sector"],
             "weekly_return": pct(s["ret"][week]),
             "growth_since_2007": None if g is None else f"x{g:.2f}",
@@ -72,7 +97,7 @@ def gather(ticker, sector, week, event=None):
             "trading_volume_vs_normal": s["relVolume"][week],
             "sector_weekly_return": pct(sec["ret"][week]),
         })
-        return ticker, facts
+        return s.get("name", ticker) if s.get("name") and s.get("name") != ticker else ticker, facts
     if sector in SECTORS:
         sec = SECTORS[sector]
         facts.update({
@@ -94,7 +119,8 @@ def template(subject, f):
     corr = f["avg_sector_correlation"]
     s1 = f"In the week of {f['week_ending']}, {subject} {move}"
     s1 += "." if subject == "the market" else f", while the whole market moved {f['market_weekly_return']}."
-    s2 = (f"Market fear was {f['vix_mood']} (VIX {vix:.0f})." if vix is not None else "")
+    label = f.get("fear_measure", "VIX")
+    s2 = (f"Market fear was {f['vix_mood']} ({label} {vix:.0f})." if vix is not None else "")
     if corr is not None:
         s3 = ("Sectors were moving almost in lockstep, so diversification offered little shelter."
               if corr > 0.75 else
@@ -133,12 +159,13 @@ def call_llm(prompt: str) -> str:
     return text
 
 
-def explain(ticker, sector, week, event=None):
+def explain(ticker, sector, week, event=None, market="us"):
     """event: optional name of the week (tours only, written by us, never by the client)."""
-    key = (ticker, sector, week, event)
+    mk = market_for(market)
+    key = (mk.meta.get("id"), ticker, sector, week, event)
     if key in _cache:
         return _cache[key]
-    subject, facts = gather(ticker, sector, week, event)
+    subject, facts = gather(ticker, sector, week, event, mk)
     fallback = template(subject, facts)
     result = {"text": fallback, "source": "template", "facts": facts}
     if os.environ.get("ANTHROPIC_API_KEY"):
@@ -158,7 +185,7 @@ def explain(ticker, sector, week, event=None):
 
 @app.post("/api/explain")
 def api_explain(req: ExplainRequest):
-    return explain(req.ticker, req.sector, req.week)
+    return explain(req.ticker, req.sector, req.week, market=req.market)
 
 
 # ───────────── Ask the planet ─────────────
@@ -166,18 +193,23 @@ from server.ask import Asker, NO_ADVICE, is_advice  # noqa: E402
 
 _tours_path = Path(__file__).parent.parent / "public" / "tours.json"
 TOURS = json.loads(_tours_path.read_text(encoding="utf-8")) if _tours_path.exists() else []
-ASKER = Asker(WORLD, TOURS, gather, template)
+# One asker per market; tours (US events and narrations) only for the US planet
+ASKERS = {mid: Asker(mk.world, TOURS if mid == "us" else [],
+                     (lambda t, s, w, _mk=mk: gather(t, s, w, None, _mk)), template)
+          for mid, mk in MARKETS.items()}
 _ask_cache: dict[str, dict] = {}
 
 
 class AskRequest(BaseModel):
     question: str
+    market: str = "us"
 
 
 @app.post("/api/ask")
 def api_ask(req: AskRequest):
     q = req.question.strip()[:300]
-    key = q.lower()
+    ASKER = ASKERS.get(req.market) or ASKERS.get("us") or next(iter(ASKERS.values()))
+    key = f"{req.market}|{q.lower()}"
     if key in _ask_cache:
         return _ask_cache[key]
     if not q:
@@ -201,4 +233,5 @@ def api_ask(req: AskRequest):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "model": MODEL, "ai": bool(os.environ.get("ANTHROPIC_API_KEY"))}
+    return {"ok": True, "model": MODEL, "ai": bool(os.environ.get("ANTHROPIC_API_KEY")),
+            "markets": list(MARKETS)}

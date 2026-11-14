@@ -1,14 +1,20 @@
-"""Download ~20 years of market data and write public/world.json.
+"""Download ~20 years of market data and write one planet per market.
 
-Usage:  python build_world.py            (downloads from Yahoo Finance)
-        python build_world.py --cached   (re-uses data/raw.pkl, no internet)
+Usage:  python build_world.py                     (US: downloads from Yahoo Finance)
+        python build_world.py --market uk         (one market: us | uk | asia)
+        python build_world.py --market all        (every market)
+        python build_world.py --cached ...        (re-use data/raw-<market>.pkl, no internet)
+
+Outputs (public/): US → world.json + stress.json (unchanged names); other markets →
+world-<id>.json + stress-<id>.json; markets.json lists them all for the planet switcher.
 
 JSON contract (keep in sync with main.js and server/app.py):
 {
   "dates":   ["2007-01-05", ...],                       # weekly, Fridays
   "sectors": [{"name", "tickers", "ret": [], "vol": []}],
   "stocks":  [{"ticker", "sector", "growth": [], "ret": [], "vol": [], "relVolume": []}],
-  "market":  {"ret": [], "vix": [], "avgCorr": [],
+  "meta":    {"id", "name", "fearLabel", "note"},           # which market this planet is
+  "market":  {"ret": [], "vix": [], "avgCorr": [],         # "vix" = the market's fear measure
               "pairCorr": {"Technology|Financials": [], ...}}   # 60-day, all 15 pairs
 }
 Every array has one value per date; null = no data.
@@ -21,15 +27,84 @@ import numpy as np
 import pandas as pd
 
 START = "2007-01-01"
-SECTORS = {
-    "Technology":  ["AAPL", "MSFT", "NVDA", "GOOGL", "ORCL"],
-    "Financials":  ["JPM", "BAC", "GS", "MS", "WFC"],
-    "Energy":      ["XOM", "CVX", "COP", "SLB", "OXY"],
-    "Healthcare":  ["JNJ", "PFE", "UNH", "MRK", "ABT"],
-    "Consumer":    ["AMZN", "WMT", "KO", "PG", "MCD"],
-    "Industrials": ["CAT", "BA", "DE", "UPS", "LMT"],
+
+# One planet per market: the same six sectors, five large companies each.
+# fear: a volatility index ticker, or None → 20-day realised volatility of the market's
+# equal-weighted daily return (annualised, in %), which sits on a similar scale to the VIX.
+MARKETS = {
+    "us": {
+        "name": "United States", "short": "US", "fear": "^VIX", "fearLabel": "VIX",
+        "note": "30 large US companies; fear = the VIX index.",
+        "sectors": {
+            "Technology":  ["AAPL", "MSFT", "NVDA", "GOOGL", "ORCL"],
+            "Financials":  ["JPM", "BAC", "GS", "MS", "WFC"],
+            "Energy":      ["XOM", "CVX", "COP", "SLB", "OXY"],
+            "Healthcare":  ["JNJ", "PFE", "UNH", "MRK", "ABT"],
+            "Consumer":    ["AMZN", "WMT", "KO", "PG", "MCD"],
+            "Industrials": ["CAT", "BA", "DE", "UPS", "LMT"],
+        },
+        "names": {
+            "AAPL": "Apple", "MSFT": "Microsoft", "NVDA": "NVIDIA", "GOOGL": "Alphabet", "ORCL": "Oracle",
+            "JPM": "JPMorgan Chase", "BAC": "Bank of America", "GS": "Goldman Sachs", "MS": "Morgan Stanley",
+            "WFC": "Wells Fargo", "XOM": "ExxonMobil", "CVX": "Chevron", "COP": "ConocoPhillips", "SLB": "SLB",
+            "OXY": "Occidental", "JNJ": "Johnson & Johnson", "PFE": "Pfizer", "UNH": "UnitedHealth",
+            "MRK": "Merck", "ABT": "Abbott", "AMZN": "Amazon", "WMT": "Walmart", "KO": "Coca-Cola",
+            "PG": "Procter & Gamble", "MCD": "McDonald's", "CAT": "Caterpillar", "BA": "Boeing",
+            "DE": "Deere", "UPS": "UPS", "LMT": "Lockheed Martin",
+        },
+    },
+    "uk": {
+        "name": "United Kingdom", "short": "UK", "fear": None, "fearLabel": "realised vol",
+        "note": "30 large London-listed companies (prices in pence); fear = realised volatility, "
+                "because no UK fear index is freely available.",
+        "sectors": {
+            "Technology":  ["SGE.L", "REL.L", "EXPN.L", "HLMA.L", "BT-A.L"],
+            "Financials":  ["HSBA.L", "BARC.L", "LLOY.L", "NWG.L", "STAN.L"],
+            "Energy":      ["SHEL.L", "BP.L", "SSE.L", "NG.L", "CNA.L"],
+            "Healthcare":  ["AZN.L", "GSK.L", "SN.L", "HIK.L", "CTEC.L"],
+            "Consumer":    ["ULVR.L", "DGE.L", "TSCO.L", "BATS.L", "NXT.L"],
+            "Industrials": ["BA.L", "RR.L", "SMIN.L", "WEIR.L", "BNZL.L"],
+        },
+        "names": {
+            "SGE.L": "Sage", "REL.L": "RELX", "EXPN.L": "Experian", "HLMA.L": "Halma", "BT-A.L": "BT",
+            "HSBA.L": "HSBC", "BARC.L": "Barclays", "LLOY.L": "Lloyds", "NWG.L": "NatWest",
+            "STAN.L": "StanChart", "SHEL.L": "Shell", "BP.L": "BP", "SSE.L": "SSE",
+            "NG.L": "National Grid", "CNA.L": "Centrica", "AZN.L": "AstraZeneca", "GSK.L": "GSK",
+            "SN.L": "Smith & Nephew", "HIK.L": "Hikma", "CTEC.L": "Convatec", "ULVR.L": "Unilever",
+            "DGE.L": "Diageo", "TSCO.L": "Tesco", "BATS.L": "BAT", "NXT.L": "Next",
+            "BA.L": "BAE Systems", "RR.L": "Rolls-Royce", "SMIN.L": "Smiths Group", "WEIR.L": "Weir",
+            "BNZL.L": "Bunzl",
+        },
+    },
+    "asia": {
+        "name": "Asia-Pacific", "short": "Asia", "fear": None, "fearLabel": "realised vol",
+        "note": "30 large companies from Japan, China/Hong Kong, Korea, Taiwan and Singapore "
+                "(returns in each stock's local currency); fear = realised volatility.",
+        "sectors": {
+            "Technology":  ["2330.TW", "005930.KS", "0700.HK", "6758.T", "2317.TW"],
+            "Financials":  ["0005.HK", "1398.HK", "8306.T", "D05.SI", "0939.HK"],
+            "Energy":      ["0857.HK", "0883.HK", "0386.HK", "5020.T", "1605.T"],
+            "Healthcare":  ["4502.T", "4519.T", "4568.T", "4503.T", "4523.T"],
+            "Consumer":    ["7203.T", "9983.T", "2914.T", "005380.KS", "7267.T"],
+            "Industrials": ["6501.T", "6301.T", "7011.T", "6503.T", "8001.T"],
+        },
+        "names": {
+            "2330.TW": "TSMC", "005930.KS": "Samsung", "0700.HK": "Tencent", "6758.T": "Sony",
+            "2317.TW": "Foxconn", "0005.HK": "HSBC (HK)", "1398.HK": "ICBC", "8306.T": "MUFG",
+            "D05.SI": "DBS", "0939.HK": "CCB", "0857.HK": "PetroChina", "0883.HK": "CNOOC",
+            "0386.HK": "Sinopec", "5020.T": "ENEOS", "1605.T": "Inpex", "4502.T": "Takeda", "4519.T": "Chugai",
+            "4568.T": "Daiichi Sankyo", "4503.T": "Astellas", "4523.T": "Eisai", "7203.T": "Toyota",
+            "9983.T": "Fast Retailing", "2914.T": "Japan Tobacco", "005380.KS": "Hyundai Motor",
+            "7267.T": "Honda", "6501.T": "Hitachi", "6301.T": "Komatsu", "7011.T": "MHI",
+            "6503.T": "Mitsubishi Elec.", "8001.T": "Itochu",
+        },
+    },
 }
+
+# Active market (set by use_market); build() reads these
+SECTORS = MARKETS["us"]["sectors"]
 VIX = "^VIX"
+MARKET_ID = "us"
 VOL_WINDOW = 20      # trading days for volatility
 CORR_WINDOW = 30     # trading days for average sector correlation (30 reacts to crashes quickly)
 PAIR_CORR_WINDOW = 60  # trading days for each sector-pair correlation (fault lines)
@@ -39,6 +114,21 @@ ROOT = Path(__file__).parent
 RAW = ROOT / "data" / "raw.pkl"
 OUT = ROOT / "public" / "world.json"
 STRESS_OUT = ROOT / "public" / "stress.json"
+INDEX_OUT = ROOT / "public" / "markets.json"
+
+
+def files_for(mid):
+    """US keeps the original file names; other markets get a suffix."""
+    suffix = "" if mid == "us" else f"-{mid}"
+    return f"world{suffix}.json", f"stress{suffix}.json", f"raw{'' if mid == 'us' else '-' + mid}.pkl"
+
+
+def use_market(mid):
+    global SECTORS, VIX, MARKET_ID, RAW, OUT, STRESS_OUT
+    m = MARKETS[mid]
+    world_f, stress_f, raw_f = files_for(mid)
+    SECTORS, VIX, MARKET_ID = m["sectors"], m["fear"], mid
+    RAW, OUT, STRESS_OUT = ROOT / "data" / raw_f, ROOT / "public" / world_f, ROOT / "public" / stress_f
 CALM_VIX, CRISIS_VIX = 20, 30   # stress-test regimes: calm = VIX < 20, crisis = VIX > 30
 MARKET_SHOCK, SECTOR_SHOCK = -0.04, -0.07   # meteor strikes: daily falls at or below these
 MAX_SHOCKS_PER_WEEK = 3
@@ -46,7 +136,7 @@ MAX_SHOCKS_PER_WEEK = 3
 
 def download():
     import yfinance as yf
-    tickers = [t for ts in SECTORS.values() for t in ts] + [VIX]
+    tickers = [t for ts in SECTORS.values() for t in ts] + ([VIX] if VIX else [])
     df = yf.download(tickers, start=START, auto_adjust=True,
                      progress=False, group_by="column", threads=True)
     if df is None or df.empty:
@@ -74,12 +164,14 @@ def build(close, volume):
     close.index = pd.to_datetime(close.index).tz_localize(None)
     volume.index = pd.to_datetime(volume.index).tz_localize(None)
     # Drop days when only VIX traded (stock holidays); they would break rolling windows.
-    stock_cols = [t for t in close.columns if t != VIX]
+    stock_cols = [t for t in close.columns if t != VIX and t in sum(SECTORS.values(), [])]
     keep = close[stock_cols].notna().any(axis=1)
     print(f"Dropping {(~keep).sum()} non-trading days")
     close, volume = close[keep], volume.reindex(close.index[keep])
 
-    daily_ret = close.pct_change(fill_method=None)
+    # Each stock's return over its own trading days, so another exchange's holiday
+    # (different markets in one planet) does not blank the next day's return.
+    daily_ret = close.apply(lambda col: col.dropna().pct_change()).reindex(close.index)
     daily_vol = daily_ret.rolling(VOL_WINDOW, min_periods=VOL_WINDOW).std() * np.sqrt(252)
 
     # Weekly frames (week ending Friday)
@@ -98,6 +190,7 @@ def build(close, volume):
             first = wk_close[t].dropna().iloc[0]
             stocks.append({
                 "ticker": t,
+                "name": MARKETS[MARKET_ID]["names"].get(t, t),
                 "sector": name,
                 "growth": clean(wk_close[t] / first, 3),
                 "ret": clean(wk_ret[t]),
@@ -115,7 +208,8 @@ def build(close, volume):
     # Average pairwise correlation between sector daily returns, rolling window.
     sec = pd.DataFrame(sector_daily)
     n = sec.shape[1]
-    corr = sec.rolling(CORR_WINDOW, min_periods=CORR_WINDOW).corr()
+    # min_periods < window: markets on several exchanges have days when a sector didn't trade
+    corr = sec.rolling(CORR_WINDOW, min_periods=int(CORR_WINDOW * 0.7)).corr()
     # sum of matrix minus diagonal (n), divided by number of off-diagonal entries
     avg_corr = (corr.groupby(level=0).sum().sum(axis=1) - n) / (n * (n - 1))
     avg_corr[corr.groupby(level=0).count().sum(axis=1) < n * n] = np.nan
@@ -127,25 +221,33 @@ def build(close, volume):
     pair_corr = {}
     for a in range(len(names)):
         for b in range(a + 1, len(names)):
-            pc = sec[names[a]].rolling(PAIR_CORR_WINDOW, min_periods=PAIR_CORR_WINDOW).corr(sec[names[b]])
+            pc = sec[names[a]].rolling(PAIR_CORR_WINDOW, min_periods=int(PAIR_CORR_WINDOW * 0.7)).corr(sec[names[b]])
             pair_corr[f"{names[a]}|{names[b]}"] = clean(pc.resample("W-FRI").last().reindex(dates), 3)
 
     all_stocks = [t for ts in SECTORS.values() for t in ts if t in close.columns]
+    # Fear: the market's volatility index, or realised volatility of the equal-weighted market
+    mkt_daily = daily_ret[all_stocks].mean(axis=1)
+    if VIX and VIX in close:
+        fear_daily = close[VIX]
+    else:
+        fear_daily = mkt_daily.rolling(VOL_WINDOW, min_periods=VOL_WINDOW).std() * np.sqrt(252) * 100
     market = {
         "ret": clean(wk_ret[all_stocks].mean(axis=1)),
-        "vix": clean(wk_close[VIX], 2) if VIX in wk_close else [None] * len(dates),
+        "vix": clean(fear_daily.resample("W-FRI").last().reindex(dates), 2),
         "avgCorr": clean(wk_corr.reindex(dates), 3),
         "pairCorr": pair_corr,
     }
+    m = MARKETS[MARKET_ID]
     world = {
+        "meta": {"id": MARKET_ID, "name": m["name"], "short": m["short"],
+                 "fearLabel": m["fearLabel"], "note": m["note"]},
         "dates": [d.strftime("%Y-%m-%d") for d in dates],
         "sectors": sectors,
         "stocks": stocks,
         "market": market,
-        "shocks": build_shocks(daily_ret[all_stocks].mean(axis=1), sec, dates),
+        "shocks": build_shocks(mkt_daily, sec, dates),
     }
-    vix_daily = close[VIX] if VIX in close else pd.Series(np.nan, index=close.index)
-    return world, build_stress(sec, vix_daily)
+    return world, build_stress(sec, fear_daily)
 
 
 def build_shocks(mkt_daily, sec, dates):
@@ -216,7 +318,9 @@ def build_stress(sec, vix_daily):
     return {"sectors": names, "calmVix": CALM_VIX, "crisisVix": CRISIS_VIX, "regimes": regimes}
 
 
-def main():
+def build_market(mid):
+    use_market(mid)
+    print(f"\n=== {MARKETS[mid]['name']} ({mid}) ===")
     if "--cached" in sys.argv and RAW.exists():
         raw = pd.read_pickle(RAW)
         close, volume = raw["close"], raw["volume"]
@@ -228,6 +332,25 @@ def main():
     STRESS_OUT.write_text(json.dumps(stress, indent=1))
     print(f"Wrote {OUT} ({OUT.stat().st_size / 1e6:.2f} MB), "
           f"{len(world['dates'])} weeks, {len(world['stocks'])} stocks")
+
+
+def write_index():
+    """public/markets.json: every market whose files exist, for the planet switcher."""
+    out = []
+    for mid, m in MARKETS.items():
+        world_f, stress_f, _ = files_for(mid)
+        if (ROOT / "public" / world_f).exists():
+            out.append({"id": mid, "name": m["name"], "short": m["short"], "world": world_f,
+                        "stress": stress_f, "fearLabel": m["fearLabel"], "note": m["note"]})
+    INDEX_OUT.write_text(json.dumps(out, indent=1))
+    print(f"\nWrote {INDEX_OUT}: {[x['id'] for x in out]}")
+
+
+def main():
+    arg = sys.argv[sys.argv.index("--market") + 1] if "--market" in sys.argv else "us"
+    for mid in (MARKETS if arg == "all" else [arg]):
+        build_market(mid)
+    write_index()
 
 
 if __name__ == "__main__":

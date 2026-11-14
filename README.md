@@ -42,6 +42,7 @@ Spotting stressed markets: rising fear and rising correlation are visible at a g
 Training: replay 20 years of market history in minutes.
 Features
 🌐 3D planet built entirely from real market data, 2007 to today
+🪐 One planet per market: switch between the US, UK and Asia-Pacific (same six sectors, 30 large companies each)
 ⏯️ Time machine: play through history one week at a time, or jump to any week
 ⛈️ Weather driven by market fear, with lightning in crisis weeks
 🌋 Earthquakes and volcanic eruptions in crash weeks

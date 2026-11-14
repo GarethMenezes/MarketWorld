@@ -74,6 +74,15 @@
     .nav button { background: none; border: 1px solid var(--line2); border-radius: 15px; padding: 4px 12px; font-size: 12px; color: var(--muted); }
     .nav button:hover { color: var(--text); }
     .fine { margin-top: 18px; color: var(--dim); font-size: 10.5px; line-height: 1.7; }
+    /* Market switcher: one planet per market */
+    .tl { pointer-events: auto; }
+    .market-switch { display: flex; border: 1px solid var(--line2); border-radius: 16px; overflow: hidden; width: max-content; margin-bottom: 8px; }
+    .market-switch button { background: #000a; border: 0; padding: 5px 14px; font-size: 12px; color: var(--muted); letter-spacing: .5px; }
+    .market-switch button[aria-pressed="true"] { background: var(--text); color: #000; }
+    .market-switch button:hover:not([aria-pressed="true"]) { color: var(--text); }
+    .market-name { color: var(--muted); }
+    #scene, .label-layer { transition: opacity .35s; }
+    body.switching #scene, body.switching .label-layer { opacity: 0; }
     /* Ask the planet */
     .ask-form input { width: 300px; background: #000a; border: 1px solid var(--line2); border-radius: 15px; padding: 4px 12px;
       font-size: 12px; color: var(--text); height: 30px; }
@@ -142,7 +151,10 @@
     <section class="planet-wrap" aria-label="Interactive market planet">
       <canvas id="scene" tabindex="0" aria-label="3D planet built from stock market data. Drag to rotate, scroll to zoom, click a mountain for details."></canvas>
       <div class="label-layer" id="labels"></div>
-      <div class="overlay tl mono">Week <b id="weekNo">—</b> / <span id="weekTotal">—</span></div>
+      <div class="overlay tl">
+        <div class="market-switch" id="marketSwitch" role="group" aria-label="Choose a market planet"></div>
+        <div class="mono market-name"><b id="marketName"></b> · Week <b id="weekNo">—</b> / <span id="weekTotal">—</span></div>
+      </div>
       <div class="overlay tr">
         <form id="askForm" class="ask-form" role="search">
           <input id="askInput" type="text" autocomplete="off" placeholder="Ask the planet… e.g. When did banks crash?" aria-label="Ask the planet" />
@@ -202,7 +214,7 @@
         <div class="meta mono"><span class="date" id="date">—</span></div>
         <div class="phase mono" id="phase">—</div>
         <h2 id="headline">—</h2>
-        <div class="row"><span class="k">Fear (VIX)</span><span class="v" id="vix">—</span></div>
+        <div class="row"><span class="k" id="fearK">Fear (VIX)</span><span class="v" id="vix">—</span></div>
         <div class="row"><span class="k">Sea level</span><span class="v" id="corr">—</span></div>
         <div class="row"><span class="k">Market</span><span class="v" id="mret">—</span></div>
         <div id="mood" class="mono"></div>
@@ -216,7 +228,7 @@
         <div id="ai"></div>
       </article>
 
-      <div class="fine">For exploration and education — not financial advice.<br>
+      <div class="fine"><span id="marketNote"></span><br>For exploration and education — not financial advice.<br>
         Planet shader: <a href="https://github.com/jsulpis/realtime-planet-shader" target="_blank" rel="noopener noreferrer">Julien Sulpis</a>
         (<a href="licenses/realtime-planet-shader.txt">GPL-3.0</a>), adapted by Gareth Menezes ·
         <a href="https://github.com/Jaysmito101/TerraForge3D" target="_blank" rel="noopener noreferrer">TerraForge3D</a> (<a href="licenses/TerraForge3D.txt">MIT</a>)</div>
@@ -239,10 +251,11 @@
   <dialog id="aboutDialog">
     <button class="close" id="closeAbout" aria-label="Close">×</button>
     <h2>Every feature is a real number.</h2>
-    <div class="guide-row"><b>Continents</b><span>Six sectors, five large US companies each. Name shown on the continent.</span></div>
+    <div class="guide-row"><b>Planets</b><span>One planet per market — switch at the top left. Same date, different market.</span></div>
+    <div class="guide-row"><b>Continents</b><span>Six sectors, five large companies each, in the market you picked (US, UK or Asia-Pacific). Name shown on the continent.</span></div>
     <div class="guide-row"><b>Mountains</b><span>One per company, ticker above the peak. Height = price growth since 2007 (log scale). Glow at the foot = this week's return <span class="swatch"></span> red down, green up.</span></div>
     <div class="guide-row"><b>Sea level</b><span>Average correlation between sectors. Calm: normal sea, six separate continents. As sectors start moving together the sea falls and wide salt flats appear around every coast; at correlation 0.85+ the sea is at its lowest — diversification fails when it is needed most. The faint ring marks the normal shoreline.</span></div>
-    <div class="guide-row"><b>Weather</b><span>Market fear (VIX): storms, red atmosphere, dimmer sun; lightning above 40.</span></div>
+    <div class="guide-row"><b>Weather</b><span>Market fear (the VIX in the US; realised volatility for the UK and Asia): storms, red atmosphere, dimmer sun; lightning above 40.</span></div>
     <div class="guide-row"><b>Volcanoes</b><span>Weeks when stocks fell over 7% on average, on the two hardest-hit sectors. The planet shakes.</span></div>
     <div class="guide-row"><b>Keys</b><span>Space play · ←/→ week · Shift+←/→ year · 1–9 tour stops · Esc close</span></div>
     <div class="guide-row"><b>Limits</b><span>Price growth, not market cap. Today's big companies (survivorship bias). Not financial advice.</span></div>

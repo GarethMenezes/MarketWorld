@@ -47,6 +47,8 @@ class Asker:
     def __init__(self, world, tours, gather, template):
         self.world, self.tours, self.gather, self.template = world, tours, gather, template
         self.dates = world["dates"]
+        self.name = world.get("meta", {}).get("name", "United States")
+        self.fear = world.get("meta", {}).get("fearLabel", "VIX")
         self.sectors = {s["name"]: s for s in world["sectors"]}
         self.stocks = {s["ticker"]: s for s in world["stocks"]}
         self.context = self._build_context()
@@ -60,6 +62,8 @@ class Asker:
     def _build_context(self):
         m = self.world["market"]
         ctx = {
+            "market": self.name,
+            "companies": {t: s.get("name", t) for t, s in self.stocks.items()},
             "date_range": [self.dates[0], self.dates[-1]],
             "sectors": {n: s["tickers"] for n, s in self.sectors.items()},
             "market_worst_weeks": self._top(m["ret"]),
@@ -74,8 +78,8 @@ class Asker:
 
     def prompt(self, question):
         return (
-            "You are the guide of Market Worlds, a planet built from US stock market data "
-            "(weekly returns as fractions, e.g. -0.199 = -19.9%).\n"
+            f"You are the guide of Market Worlds, a planet built from {self.name} stock market data "
+            f"(weekly returns as fractions, e.g. -0.199 = -19.9%; market fear = {self.fear}).\n"
             f"Context (the only data you may use):\n{self.context}\n\n"
             f"Question: {question}\n\n"
             "Reply with JSON only, no other text: "
@@ -136,8 +140,9 @@ class Asker:
         year = int(year_m.group(1)) if year_m and 2007 <= int(year_m.group(1)) <= 2026 else None
         month = next((i + 1 for i, mn in enumerate(MONTHS) if mn in q or re.search(rf"\b{mn[:3]}\b", q)), None)
         focus = "market"
-        for t, word in COMPANY_WORDS.items():
-            if re.search(rf"\b{t.lower()}\b", q) or word in q:
+        for t, s in self.stocks.items():                     # ticker or company name in this market
+            word = COMPANY_WORDS.get(t) or s.get("name", "").lower()
+            if re.search(rf"\b{re.escape(t.lower())}\b", q) or (len(word) > 2 and word in q):
                 focus = t
         for name, words in SECTOR_WORDS.items():
             if focus == "market" and any(re.search(rf"\b{w}\b", q) for w in words):
@@ -148,7 +153,7 @@ class Asker:
         if "lehman" in q or "financial crisis" in q or "great recession" in q:
             year = year or 2008
         if re.search(r"\bai\b", q):
-            focus = "NVDA" if focus == "market" else focus
+            focus = ("NVDA" if "NVDA" in self.stocks else "Technology") if focus == "market" else focus
             year = year or 2023
 
         m = self.world["market"]
@@ -174,13 +179,15 @@ class Asker:
         if kind in ("fear", "together"):
             focus = "market"
         subject, facts = self.facts(week, focus)
-        lead = {
-            "fear": f"Market fear peaked in the week of {self.dates[week]} (VIX {m['vix'][week]:.0f}).",
-            "together": f"Sectors moved most closely together in the week of {self.dates[week]} "
-                        f"(average correlation {m['avgCorr'][week]:.2f}).",
-            "best": f"The best week for {subject}{' in ' + str(year) if year else ''} was the week of {self.dates[week]}.",
-            "worst": f"The worst week for {subject}{' in ' + str(year) if year else ''} was the week of {self.dates[week]}.",
-        }[kind]
+        fmt = lambda v, f: "n/a" if v is None else format(v, f)
+        where = f" in {year}" if year else ""
+        if kind == "fear":
+            lead = f"Market fear peaked in the week of {self.dates[week]} ({self.fear} {fmt(m['vix'][week], '.0f')})."
+        elif kind == "together":
+            lead = (f"Sectors moved most closely together in the week of {self.dates[week]} "
+                    f"(average correlation {fmt(m['avgCorr'][week], '.2f')}).")
+        else:
+            lead = f"The {kind} week for {subject}{where} was the week of {self.dates[week]}."
         return self.respond(week, focus, f"{lead} {self.template(subject, facts)}", "fallback")
 
     def _series(self, focus):

@@ -59,6 +59,21 @@ const SECTOR_COLORS = {
   Industrials: '#7aa83a',  // olive
 };
 
+// ───────────────────────────── MARKET (which planet) ─────────────────────────────
+// ?market=us|uk|asia picks the planet. public/markets.json (built by build_world.py) lists
+// each market's data files. Each market also gets its own look, so the planets differ.
+const PLANET_LOOKS = {
+  us:   { seed: 0,    spin: 0,   atmo: '#4aa8ff', waterDeep: [0.02, 0.05, 0.10], waterSurface: [0.05, 0.16, 0.30], cloudsCalm: 0.25 },
+  uk:   { seed: 11.3, spin: 1.1, atmo: '#8cc2e0', waterDeep: [0.02, 0.06, 0.08], waterSurface: [0.06, 0.17, 0.22], cloudsCalm: 0.42 },
+  asia: { seed: 23.7, spin: 2.4, atmo: '#55d0ff', waterDeep: [0.01, 0.06, 0.09], waterSurface: [0.03, 0.21, 0.29], cloudsCalm: 0.22 },
+};
+const MARKET_ID = new URLSearchParams(location.search).get('market') || 'us';
+const MARKETS = await fetch('/markets.json').then((r) => (r.ok ? r.json() : [])).catch(() => []);
+const MARKET = MARKETS.find((m) => m.id === MARKET_ID) ?? MARKETS.find((m) => m.id === 'us')
+  ?? { id: 'us', name: 'United States', short: 'US', world: 'world.json', stress: 'stress.json', fearLabel: 'VIX' };
+const LOOK = PLANET_LOOKS[MARKET.id] ?? PLANET_LOOKS.us;
+CONFIG.clouds.calm = LOOK.cloudsCalm;
+
 // ───────────────────────────── SETUP ─────────────────────────────
 const R = CONFIG.planetRadius;
 const canvas = document.getElementById('scene');
@@ -174,7 +189,7 @@ function makeNoiseTexture() {
   tex.needsUpdate = true;
   return tex;
 }
-const ATMO_CALM = new THREE.Color('#4aa8ff');
+const ATMO_CALM = new THREE.Color(LOOK.atmo);
 const ATMO_STORM = new THREE.Color('#ff4a2a');
 const planetUniforms = {
   uTime: { value: 0 },
@@ -194,8 +209,9 @@ const planetUniforms = {
   uSunIntensity: { value: 3 },
   uAmbientLight: { value: 0.055 },
   uStorm: { value: 0 }, uEruption: { value: 0 }, uFlash: { value: 0 }, uStress: { value: 0 },
-  uWaterDeep: { value: new THREE.Color(0.02, 0.05, 0.1) },
-  uWaterSurface: { value: new THREE.Color(0.05, 0.16, 0.3) },
+  uWaterDeep: { value: new THREE.Color(...LOOK.waterDeep) },
+  uWaterSurface: { value: new THREE.Color(...LOOK.waterSurface) },
+  uWorldSeed: { value: LOOK.seed },
   uRockColor: { value: new THREE.Color(0.32, 0.29, 0.26) },
   uAccent: { value: ATMO_CALM.clone() },
   uContinentDir: { value: Array.from({ length: 6 }, () => new THREE.Vector3(0, 0, 1)) },
@@ -344,7 +360,7 @@ function makeMountainGeometry(seed) {
 const footRingGeometry = new THREE.RingGeometry(MOUNTAIN_RADIUS * 1.0, MOUNTAIN_RADIUS * 1.14, 48).rotateX(-Math.PI / 2);
 
 // Company names for labels and the info card
-const COMPANY = {
+const COMPANY_US = {
   AAPL: 'Apple', MSFT: 'Microsoft', NVDA: 'NVIDIA', GOOGL: 'Alphabet', ORCL: 'Oracle',
   JPM: 'JPMorgan Chase', BAC: 'Bank of America', GS: 'Goldman Sachs', MS: 'Morgan Stanley', WFC: 'Wells Fargo',
   XOM: 'ExxonMobil', CVX: 'Chevron', COP: 'ConocoPhillips', SLB: 'SLB', OXY: 'Occidental',
@@ -361,17 +377,21 @@ function makeLabel(text, cls, title) {
 }
 
 // ───────────────────────────── DATA → WORLD ─────────────────────────────
-const data = await fetch('/world.json').then((r) => r.json());
+const data = await fetch(`/${MARKET.world}`).then((r) => r.json());
+// Company names: from the data (every market), falling back to the US list
+const COMPANY = Object.fromEntries(data.stocks.map((s) => [s.ticker, s.name ?? COMPANY_US[s.ticker] ?? s.ticker]));
+const FEAR = data.meta?.fearLabel ?? MARKET.fearLabel ?? 'VIX';
 // 'What if?' sandbox betas (optional file; the button hides if it is missing)
-const stress = await fetch('/stress.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+const stress = await fetch(`/${MARKET.stress ?? 'stress.json'}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
 let tours = []; // filled in the GUIDED TOURS section; declared early so key handlers never hit it uninitialised
 const N = data.dates.length;
 const stockIndex = Object.fromEntries(data.stocks.map((s) => [s.ticker, s]));
 
 // Fixed continents (no drift) on the six directions of an octahedron, rotated so the default
 // view looks at the point between Technology, Financials and Energy.
-const qTilt = new THREE.Quaternion().setFromUnitVectors(
-  new THREE.Vector3(1, 1, 1).normalize(), new THREE.Vector3(0, 3.2, 15).normalize());
+const VIEW_DIR = new THREE.Vector3(0, 3.2, 15).normalize();
+const qTilt = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(1, 1, 1).normalize(), VIEW_DIR)
+  .premultiply(new THREE.Quaternion().setFromAxisAngle(VIEW_DIR, LOOK.spin));   // each market: its own layout
 const PLATE_DIRS = [[0, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, -1], [-1, 0, 0], [0, -1, 0]]
   .map((v) => new THREE.Vector3(...v).applyQuaternion(qTilt));
 const continents = data.sectors.map((sector, i) => {
@@ -403,7 +423,8 @@ const continents = data.sectors.map((sector, i) => {
     ring.position.copy(d).multiplyScalar(R + 0.012);
     ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
     group.add(ring);
-    const label = makeLabel(ticker, 'tk', COMPANY[ticker]);
+    // US: tickers are familiar; other markets: company names ("7203.T" means nothing to most people)
+    const label = makeLabel(MARKET.id === 'us' ? ticker : COMPANY[ticker], 'tk', `${COMPANY[ticker]} (${ticker})`);
     label.position.set(0, 1.08, 0); // just above the peak; follows the mountain's height
     mesh.add(label);
     mesh.position.copy(d).multiplyScalar(R - 0.02); // shader surface is a sphere of radius R
@@ -568,10 +589,11 @@ function updateStatsPanel() {
   $('planetTag').classList.toggle('risk', story.risk);
   $('weekNo').textContent = String(i + 1).padStart(4, '0');
   $('counter').textContent = `week ${i + 1} / ${N}`;
-  $('weather').innerHTML = `<span class="dot"></span> ${m.vix[i] == null ? '—' : `${vixLabel(m.vix[i])} skies · VIX ${m.vix[i].toFixed(0)}`}`;
+  $('weather').innerHTML = `<span class="dot"></span> ${m.vix[i] == null ? '—' : `${vixLabel(m.vix[i])} skies · ${FEAR} ${m.vix[i].toFixed(0)}`}`;
   $('weather').classList.toggle('risk', story.risk);
   markTick(i);
   $('vix').textContent = m.vix[i] == null ? '—' : `${m.vix[i].toFixed(1)} · ${vixLabel(m.vix[i])}`;
+  $('fearK').textContent = `Fear (${FEAR})`;
   $('corr').textContent = m.avgCorr[i] == null ? '—' : `${corrLabel(m.avgCorr[i])} · corr ${m.avgCorr[i].toFixed(2)}`;
   $('mret').innerHTML = `<span class="${cls(m.ret[i])}">${pct(m.ret[i])}</span>`;
   const notes = [];
@@ -643,7 +665,7 @@ function requestExplanation() {
     try {
       const r = await fetch('/api/explain', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ticker: sel.ticker, sector: sel.ticker ? null : sel.sector, week }),
+        body: JSON.stringify({ ticker: sel.ticker, sector: sel.ticker ? null : sel.sector, week, market: MARKET.id }),
       });
       if (r.ok) res = await r.json();
     } catch { /* backend offline: fall through */ }
@@ -689,7 +711,9 @@ playBtn.addEventListener('keydown', (e) => { if (e.code === 'Space') e.preventDe
 // ───────────────────────────── GUIDED TOURS ─────────────────────────────
 // public/tours.json: [{ date, title, focus: "market" | sector | ticker, narration, narrationSource }]
 // Narrations are pre-generated (python -m server.make_tours) so the tour works offline.
-tours = await fetch('/tours.json').then((r) => (r.ok ? r.json() : [])).catch(() => []);
+tours = MARKET.id !== 'us' ? [] // the tour narrates US events
+  : await fetch('/tours.json').then((r) => (r.ok ? r.json() : [])).catch(() => []);
+if (!tours.length) for (const id of ['tourBtn', 'prevStop', 'nextStop']) $(id).style.display = 'none';
 const AXIS_X = new THREE.Vector3(1, 0, 0);
 const tourQ = new THREE.Quaternion(), tmpV = new THREE.Vector3();
 const fly = { active: false, t: 0, fromDir: new THREE.Vector3(), toDir: new THREE.Vector3(), fromDist: 0, toDist: 0 };
@@ -894,9 +918,31 @@ if (soundWanted) {
   window.addEventListener('keydown', start, { once: true });
 }
 
+// ───────────────────────────── MARKET SWITCHER ─────────────────────────────
+// Each market is its own planet. Switching keeps the date: the new planet opens at the same week.
+(function buildSwitcher() {
+  const box = $('marketSwitch');
+  if (MARKETS.length < 2) { box.style.display = 'none'; return; }
+  for (const mk of MARKETS) {
+    const b = document.createElement('button');
+    b.textContent = mk.short;
+    b.title = mk.name;
+    b.setAttribute('aria-pressed', String(mk.id === MARKET.id));
+    b.addEventListener('click', () => {
+      if (mk.id === MARKET.id) return;
+      const q = new URLSearchParams({ market: mk.id, week: data.dates[state.week] });
+      document.body.classList.add('switching');          // fade out, then load the other planet
+      setTimeout(() => { location.search = q.toString(); }, 350);
+    });
+    box.appendChild(b);
+  }
+  $('marketName').textContent = MARKET.name;
+  $('marketNote').textContent = data.meta?.note ?? '';
+})();
+
 // ───────────────────────────── ASK THE PLANET ─────────────────────────────
 createAsk({
-  $, data, fmtDate,
+  $, data, fmtDate, market: MARKET.id,
   go(weekIndex, focus) {
     if (sandbox?.isActive()) sandbox.close();
     if (state.touring) exitTour();

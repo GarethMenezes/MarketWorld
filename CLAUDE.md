@@ -108,3 +108,12 @@ Calm week → play from 2007, sky reddens → pause at `?week=2008-10-10` (super
 - `market.pairCorr` (60-day, 15 pairs) is in world.json but currently unused by the frontend.
 - Planet look: dark night side, polar ice, ocean glint, limb haze, thin rim, full-res rendering (dpr 2).
 - Exposed seabed = wet sand → salt flats; foam at the shore; faint ring at the normal shoreline.
+
+## 10. Markets (one planet each)
+
+- `build_world.py --market us|uk|asia|all [--cached]`; `MARKETS` table holds tickers, names and the fear source.
+  US → world.json / stress.json (unchanged names); others → world-<id>.json / stress-<id>.json;
+  public/markets.json lists them. UK/Asia fear = 20-day realised volatility (no free fear index).
+- Frontend: `?market=` picks the planet; `PLANET_LOOKS` in main.js gives each its seed, layout spin,
+  ocean and atmosphere colours. The tour (US events) only shows on the US planet.
+- Backend: /api/explain and /api/ask take `market` (default "us").

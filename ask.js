@@ -38,7 +38,7 @@ export function localAnswer(question, data) {
   const month = mi === -1 ? null : mi + 1;
   let focus = 'market';
   for (const s of data.stocks) {
-    const word = COMPANY_WORDS[s.ticker];
+    const word = COMPANY_WORDS[s.ticker] ?? (s.name && s.name.length > 2 ? s.name.toLowerCase() : null);
     if (new RegExp(`\\b${esc(s.ticker.toLowerCase())}\\b`).test(q) || (word && q.includes(word))) focus = s.ticker;
   }
   if (focus === 'market') {
@@ -48,7 +48,7 @@ export function localAnswer(question, data) {
   }
   if (/covid|pandemic/.test(q)) year = year ?? 2020;
   if (/lehman|financial crisis|great recession/.test(q)) year = year ?? 2008;
-  if (/\bai\b/.test(q)) { if (focus === 'market') focus = 'NVDA'; year = year ?? 2023; }
+  if (/\bai\b/.test(q)) { if (focus === 'market') focus = data.stocks.some((s) => s.ticker === 'NVDA') ? 'NVDA' : 'Technology'; year = year ?? 2023; }
 
   const m = data.market;
   const stock = data.stocks.find((s) => s.ticker === focus), sector = data.sectors.find((s) => s.name === focus);
@@ -70,17 +70,15 @@ export function localAnswer(question, data) {
   });
   if (week === -1) return none(UNSURE);
   if (kind === 'fear' || kind === 'together') focus = 'market';
-  const subject = stock ? focus : sector ? `the ${focus} sector` : 'the market';
+  const subject = stock ? (stock.name ?? focus) : sector ? `the ${focus} sector` : 'the market';
   const d = data.dates[week];
   const p = (x) => (x == null ? 'n/a' : `${x > 0 ? '+' : ''}${(x * 100).toFixed(1)}%`);
-  const lead = {
-    fear: `Market fear peaked in the week of ${d} (VIX ${m.vix[week].toFixed(0)}).`,
-    together: `Sectors moved most closely together in the week of ${d} (average correlation ${m.avgCorr[week].toFixed(2)}).`,
-    best: `The best week for ${subject}${year ? ` in ${year}` : ''} was the week of ${d}.`,
-    worst: `The worst week for ${subject}${year ? ` in ${year}` : ''} was the week of ${d}.`,
-  }[kind];
+  const f = (v, n) => (v == null ? 'n/a' : v.toFixed(n));
+  const lead = kind === 'fear' ? `Market fear peaked in the week of ${d} (${data.meta?.fearLabel ?? 'VIX'} ${f(m.vix[week], 0)}).`
+    : kind === 'together' ? `Sectors moved most closely together in the week of ${d} (average correlation ${f(m.avgCorr[week], 2)}).`
+    : `The ${kind} week for ${subject}${year ? ` in ${year}` : ''} was the week of ${d}.`;
   const ownSeries = kind === 'fear' || kind === 'together' ? m.ret : own;
-  const extra = ` ${subject[0].toUpperCase()}${subject.slice(1)} moved ${p(ownSeries[week])} that week; the whole market moved ${p(m.ret[week])} with VIX ${m.vix[week]?.toFixed(0) ?? 'n/a'}.`;
+  const extra = ` ${subject[0].toUpperCase()}${subject.slice(1)} moved ${p(ownSeries[week])} that week; the whole market moved ${p(m.ret[week])} with ${data.meta?.fearLabel ?? 'VIX'} ${m.vix[week]?.toFixed(0) ?? 'n/a'}.`;
   return { weekIndex: week, date: d, focus, answer: lead + extra, source: 'fallback' };
 }
 
@@ -112,7 +110,7 @@ export function createAsk(ctx) {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 10000);
       const r = await fetch('/api/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }), signal: ctrl.signal });
+        body: JSON.stringify({ question, market: ctx.market ?? 'us' }), signal: ctrl.signal });
       clearTimeout(timer);
       if (r.ok) res = await r.json();
     } catch { /* backend down or slow: answer locally */ }

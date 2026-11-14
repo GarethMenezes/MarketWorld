@@ -54,6 +54,7 @@ uniform mat3 uContinentRot[6];  // world → continent-local rotation
 uniform vec3 uContinentColor[6];
 uniform float uContinentCap;    // continent angular radius (radians)
 uniform vec3 uVentDir[2];       // volcano axes (unit vectors, world)
+uniform float uWorldSeed;       // per-market planet: different continent shapes
 uniform float uSeaLevel;        // current sea level in altitude units (0 = normal); falls with correlation
 uniform float uStressTint[6];   // 'What if?' sandbox: predicted fall per continent → darker, redder land
 
@@ -126,7 +127,7 @@ int nearestContinent(vec3 n, out float bestDot) {
 // mountains always stand on land). Small offshore islands are scattered near the coast.
 float hash1(float x) { return fract(sin(x * 12.9898) * 43758.5453); }
 float continentShape(vec3 local, int i, out float islands) {
-  float fi = float(i);
+  float fi = float(i) + uWorldSeed;
   vec3 seed = vec3(fi * 17.3, fi * 5.1, fi * 2.7);
   float size = .82 + .36 * hash1(fi + 1.);               // continents differ in size
   float stretch = .68 + .64 * hash1(fi + 7.);            // and in elongation
@@ -151,7 +152,7 @@ float terrainAltitude(vec3 n, out int best) {
   float bd;
   best = nearestContinent(n, bd);
   vec3 local = uContinentRot[best] * n;                // continent frame (centre = +Z)
-  vec3 seed = vec3(float(best) * 17.3, float(best) * 5.1, 0.);
+  vec3 seed = vec3(float(best) * 17.3 + uWorldSeed * 3.1, float(best) * 5.1, uWorldSeed);
   float islands;
   float ang = continentShape(local, best, islands);
   float mask = max(1. - smoothstep(.9, 1.0, ang), islands);
