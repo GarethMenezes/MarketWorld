@@ -31,8 +31,10 @@ CRASH = r"crash|worst|fall|fell|drop|panic|plunge|collapse|tank|bad"
 BEST = r"best|boom|rally|recover|surge|soar|rise|rose|gain|good"
 FEAR = r"fear|scary|scared|afraid|vix|volatil"
 TOGETHER = r"together|connected|correlat|in sync|diversif"
-ADVICE = (r"\bshould i\b|\bbuy\b|\bsell\b|\binvest(ing|ment)?\b|\bwhat will\b|\bwill .* (go up|rise|fall)\b"
-          r"|\bpredict|\brecommend|\bprice target|\bworth buying")
+# Advice = asking what to do or what will happen (not just mentioning "investment banks")
+ADVICE = (r"\bshould (i|we|you)\b|\bwould you (buy|sell|invest)|\bworth buying\b|\bgood (investment|buy|time to)"
+          r"|\brecommend|\bprice target|\bpredict|\bforecast|\bwhat (stock|stocks|shares) (to|should)"
+          r"|\bwill [\w\s]+ (go up|go down|rise|fall|crash)|\b(buy|sell) (now|today|it)\b")
 
 NO_ADVICE = ("Market Worlds is for exploring market history, not for investment advice. "
              "Try asking about a past event, like 'When did banks crash?'")

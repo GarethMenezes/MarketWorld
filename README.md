@@ -50,7 +50,7 @@ Features
 🌊 Sea level driven by sector correlation
 🖱️ Click any mountain to see its numbers
 🤖 AI explorer's log: an LLM explains what happened to the stock or sector that week, using only the real numbers (falls back to a summary from the data)
-🔎 Ask the planet: type a question like "When did banks crash?" and the planet flies to the answer (AI with a keyword fallback; no investment advice)
+🔎 Ask the planet: type a question like "When did banks crash?", "Tell me about Apple", "What happened in 2016?" or "Brexit" and the planet flies to the answer; example questions appear when you click the box (AI with a built-in matcher as fallback; no investment advice)
 🧪 What if? stress test: shock one sector and see how the others would likely react in calm vs crisis times (simple linear model, works offline)
 🔊 Soundscape generated from the data: drone, wind, waves, thunder, earthquakes and meteors (muted until you turn it on)
 🗺️ Guided tours of major market events

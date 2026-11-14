@@ -32,3 +32,36 @@ test('worst week for Energy in 2020 stays inside 2020', () => {
   assert.equal(r.focus, 'Energy');
   assert.ok(r.date.startsWith('2020'));
 });
+
+// Free-form questions the matcher now understands (no backend, no API key)
+const more = [
+  ['tell me about apple', 'AAPL'],
+  ['which company grew the most?', 'NVDA'],
+  ['svb', 'Financials'],
+  ['oil price war', 'Energy'],
+  ['how did boeing do', 'BA'],
+];
+for (const [q, focus] of more) {
+  test(`free-form: ${q}`, () => {
+    const r = localAnswer(q, us);
+    assert.equal(r.focus, focus);
+    assert.ok(r.weekIndex != null && !r.help);
+  });
+}
+
+test('an exact date goes to the week that contains it', () => {
+  assert.equal(localAnswer('what happened on 16 march 2020', us).date, '2020-03-20');
+});
+
+test('mentioning investment banks is not treated as an advice request', () => {
+  const r = localAnswer('When did investment banks crash?', us);
+  assert.equal(r.focus, 'Financials');
+  assert.equal(r.date, '2008-10-10');
+});
+
+test('companies not on the planet and unmatched questions get help, not a dead end', () => {
+  assert.match(localAnswer('what about tesla?', us).answer, /isn't one of the 30 companies/);
+  const r = localAnswer('what is the meaning of life', us);
+  assert.equal(r.help, true);
+  assert.equal(r.weekIndex, null);
+});
