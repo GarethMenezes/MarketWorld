@@ -578,6 +578,11 @@ function nearestWeek(dates, date) {
   dates.forEach((d, i) => { const gap = Math.abs(Date.parse(`${d}T12:00:00Z`) - t); if (gap < best) { best = gap; index = i; } });
   return index;
 }
+// The week (ending Friday) that contains a date: what a date picker or ?week= link should show
+function weekContaining(dates, date) {
+  const i = dates.findIndex((d) => d >= date);
+  return i === -1 ? dates.length - 1 : i;
+}
 const fmtDate = (s) => new Date(s + 'T00:00:00Z').toLocaleDateString('en-GB',
   { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
 
@@ -833,13 +838,18 @@ $('nextStop').addEventListener('click', () => goToStop(state.touring ? state.tou
 const jumpDate = $('jumpDate');
 jumpDate.min = data.dates[0];
 jumpDate.max = data.dates[N - 1];
-$('dateForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  if (!jumpDate.value) return;
-  const w = nearestWeek(data.dates, jumpDate.value);
+// Travel as soon as a full date is picked in the calendar or typed (the Go button is hidden in
+// this design, so waiting for a form submit meant the calendar did nothing)
+function travelToDate() {
+  if (!jumpDate.value || state.sandbox) return;
+  const w = weekContaining(data.dates, jumpDate.value);
+  if (w === state.week) return;
   setPlaying(false);
-  setWeek(w === -1 ? N - 1 : w);
-});
+  if (state.touring) exitTour();
+  setWeek(w);
+}
+jumpDate.addEventListener('change', travelToDate);
+$('dateForm').addEventListener('submit', (e) => { e.preventDefault(); travelToDate(); });
 $('about').addEventListener('click', () => $('aboutDialog').showModal());
 $('closeAbout').addEventListener('click', () => $('aboutDialog').close());
 
@@ -1226,7 +1236,7 @@ if (import.meta.env.DEV) window.mw = { scene, camera, controls, continents, plan
 function weekFromUrl() {
   const w = new URLSearchParams(location.search).get('week');
   if (!w) return null;
-  const i = nearestWeek(data.dates, w);
+  const i = weekContaining(data.dates, w);
   return i === -1 ? N - 1 : i;
 }
 const start = weekFromUrl() ?? data.dates.findIndex((d) => d >= '2007-06-29');
