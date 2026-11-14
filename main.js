@@ -25,12 +25,9 @@ const CONFIG = {
 
   // Sea level from average sector correlation (30-day window). Continents stay fixed.
   //   fall = (corr - corrLow) / (corrHigh - corrLow), clamped; level = normal + fall * (lowest - normal)
-  //   ≤ 0.3 → normal sea · ≥ 0.85 → lowest: every land bridge exposed, one landmass
+  //   ≤ 0.3 → normal sea · ≥ 0.85 → lowest: wide salt-flat shelves around every coast
   //   2017 ≈ 0.13 · Oct 2008 ≈ 0.77 · Mar 2020 ≈ 0.86   (levels in shader altitude units)
   sea: { corrLow: 0.3, corrHigh: 0.85, normal: 0, lowest: -0.065, seconds: 1.2 },
-  // Land-bridge crest per neighbouring pair from that pair's 60-day correlation (stretch goal):
-  //   crest = crestLow + rise * (crestHigh - crestLow), rise from pairCorr — always below normal sea
-  bridges: { corrLow: 0.2, corrHigh: 0.9, crestLow: -0.048, crestHigh: -0.018 },
 
   // Weather from VIX: storm = (vix - vixCalm) / vixRange, clamped to [0, 1]
   //   VIX 13 → clear blue sky · VIX 58+ → red sky, thick dark clouds
@@ -44,9 +41,8 @@ const CONFIG = {
   autoRotateSpeed: 0.35,
   tour: { flySeconds: 2, marketDistance: 15, focusDistance: 11 },
 
-  // Performance: render-resolution cap. Measured on Intel Arc iGPU at 2008-10-10:
-  // 1.0 → 6.3 ms/frame, 1.5 → 8.6 ms, 2.0 → 13.8 ms. 1.5 keeps 60 fps with headroom.
-  maxPixelRatio: 1.5,
+  // Render resolution: full screen resolution (up to 2×) for sharp edges and text.
+  maxPixelRatio: 2,
   planetLight: 1.5,         // sun strength in the planet shader (Gareth's was 3 with his own tone mapping)
 };
 
@@ -91,7 +87,7 @@ controls.autoRotateSpeed = CONFIG.autoRotateSpeed;
 
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(...viewSize()), 0.6, 0.4, 0.95);
+const bloom = new UnrealBloomPass(new THREE.Vector2(...viewSize()), 0.45, 0.22, 0.95) // tight bloom: glow without haze;
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
@@ -100,7 +96,7 @@ const sunDir = new THREE.Vector3(1, 0.5, 0.8).normalize();
 const sun = new THREE.DirectionalLight('#fff4e0', 2.4);
 sun.position.copy(sunDir).multiplyScalar(50);
 scene.add(sun);
-const ambient = new THREE.HemisphereLight('#9fb8ff', '#1a1020', 0.55);
+const ambient = new THREE.HemisphereLight('#9fb8ff', '#1a1020', 0.2); // low: a real night side
 scene.add(ambient);
 
 // World group: everything that shakes in an earthquake
@@ -133,17 +129,25 @@ function fbm3(x, y, z, octaves = 4) {
 }
 
 // ───────────────────────────── ATMOSPHERE (pure decoration + VIX colour) ─────────────────────────────
-function makeStars() {
-  const n = 3000, pos = new Float32Array(n * 3);
+// Starfield: many faint stars, fewer bright ones, slightly varied colours, denser along a band
+function makeStars(n, size, brightness) {
+  const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+  const v = new THREE.Vector3(), c = new THREE.Color();
+  const band = new THREE.Vector3(0.3, 1, 0.2).normalize();
   for (let i = 0; i < n; i++) {
-    const v = new THREE.Vector3().randomDirection().multiplyScalar(150 + Math.random() * 100);
+    v.randomDirection();
+    if (i % 3 === 0) v.addScaledVector(band, -v.dot(band) * 0.85).normalize(); // galactic band
+    v.multiplyScalar(150 + Math.random() * 100);
     pos.set([v.x, v.y, v.z], i * 3);
+    c.setHSL(0.55 + (Math.random() - 0.5) * 0.25, 0.35, brightness * (0.6 + Math.random() * 0.4));
+    col.set([c.r, c.g, c.b], i * 3);
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  return new THREE.Points(g, new THREE.PointsMaterial({ color: '#cfd8ff', size: 0.6, sizeAttenuation: true }));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return new THREE.Points(g, new THREE.PointsMaterial({ size, vertexColors: true, sizeAttenuation: true }));
 }
-scene.add(makeStars());
+scene.add(makeStars(6000, 0.35, 0.55), makeStars(500, 0.8, 0.95));
 
 const sunGlow = new THREE.Mesh(new THREE.SphereGeometry(3, 16, 16),
   new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 5, 3.5) }));
@@ -195,7 +199,6 @@ const planetUniforms = {
   uContinentColor: { value: Array.from({ length: 6 }, () => new THREE.Color()) },
   uContinentCap: { value: 0.45 },
   uSeaLevel: { value: 0 },
-  uBridge: { value: new Float32Array(36).fill(-2) },
   uVentDir: { value: [new THREE.Vector3(0, 0, 1), new THREE.Vector3(0, 1, 0)] },
 };
 const planet = new THREE.Mesh(new THREE.SphereGeometry(R * 1.85, 48, 32), new THREE.ShaderMaterial({
@@ -359,14 +362,11 @@ const N = data.dates.length;
 const stockIndex = Object.fromEntries(data.stocks.map((s) => [s.ticker, s]));
 
 // Fixed continents (no drift) on the six directions of an octahedron, rotated so the default
-// view looks at the point between Technology, Financials and Energy. Each continent has four
-// neighbours joined by land bridges; opposite pairs have none:
-// Technology–Healthcare, Financials–Consumer, Energy–Industrials.
+// view looks at the point between Technology, Financials and Energy.
 const qTilt = new THREE.Quaternion().setFromUnitVectors(
   new THREE.Vector3(1, 1, 1).normalize(), new THREE.Vector3(0, 3.2, 15).normalize());
 const PLATE_DIRS = [[0, 0, 1], [1, 0, 0], [0, 1, 0], [0, 0, -1], [-1, 0, 0], [0, -1, 0]]
   .map((v) => new THREE.Vector3(...v).applyQuaternion(qTilt));
-const isNeighbour = (a, b) => a !== b && PLATE_DIRS[a].dot(PLATE_DIRS[b]) > -0.5;
 const continents = data.sectors.map((sector, i) => {
   const seed = i * 13.7 + 3.1;
   const tint = SECTOR_COLORS[sector.name] || '#88aa66';
@@ -429,8 +429,6 @@ function colorFromReturn(ret, out) {
 const stormFromVix = (vix) => clamp01((vix - CONFIG.storm.vixCalm) / CONFIG.storm.vixRange);
 const seaFromCorr = (c) => CONFIG.sea.normal +
   clamp01((c - CONFIG.sea.corrLow) / (CONFIG.sea.corrHigh - CONFIG.sea.corrLow)) * (CONFIG.sea.lowest - CONFIG.sea.normal);
-const crestFromCorr = (c) => { const b = CONFIG.bridges;
-  return b.crestLow + clamp01((c - b.corrLow) / (b.corrHigh - b.corrLow)) * (b.crestHigh - b.crestLow); };
 const SECTOR_NAMES = data.sectors.map((x) => x.name);
 function pairCorrAt(a, b, i) {
   const pc = data.market.pairCorr || {};
@@ -442,7 +440,7 @@ function pairCorrAt(a, b, i) {
 const state = {
   week: 0, playing: false, acc: 0,
   storm: 0, targetStorm: 0,
-  sea: 0, targetSea: 0, bridgeTarget: new Float32Array(36).fill(-2),
+  sea: 0, targetSea: 0,
   quake: 0, flash: 0, vix: 15,
   eruption: 0, targetEruption: 0, vents: [0, 1],
   selected: null,
@@ -456,12 +454,6 @@ function setWeek(i, { quake = true } = {}) {
   const m = data.market;
   if (m.vix[i] != null) { state.vix = m.vix[i]; state.targetStorm = stormFromVix(m.vix[i]); }
   if (m.avgCorr[i] != null) state.targetSea = seaFromCorr(m.avgCorr[i]);
-  for (let a = 0; a < 6; a++) for (let b = 0; b < 6; b++) {
-    if (!isNeighbour(a, b)) continue;
-    const c = pairCorrAt(a, b, i);
-    if (c != null) state.bridgeTarget[a * 6 + b] = crestFromCorr(c);
-    else if (state.bridgeTarget[a * 6 + b] < -1) state.bridgeTarget[a * 6 + b] = CONFIG.bridges.crestLow;
-  }
   if (quake && i !== prev && m.ret[i] != null && m.ret[i] < CONFIG.quakeRet) {
     state.quake = Math.max(state.quake, Math.min(1, m.ret[i] / -0.15));
   }
@@ -528,7 +520,7 @@ function corrLabel(c) {
   if (c == null) return '';
   if (c <= CONFIG.sea.corrLow) return 'normal';
   if (c < 0.6) return 'falling';
-  if (c < CONFIG.sea.corrHigh) return 'low · bridges emerging';
+  if (c < CONFIG.sea.corrHigh) return 'low · shores drying';
   return 'lowest · one landmass';
 }
 
@@ -826,15 +818,10 @@ function animate() {
     }
   }
 
-  // Sea level (average correlation) and land-bridge crests (pair correlation), eased smoothly
+  // Sea level (average correlation), eased smoothly
   const ks = 1 - Math.exp(-dt / CONFIG.sea.seconds * 3);
   state.sea += (state.targetSea - state.sea) * ks;
   planetUniforms.uSeaLevel.value = state.sea;
-  const bridges = planetUniforms.uBridge.value;
-  for (let q = 0; q < 36; q++) {
-    const tgt = state.bridgeTarget[q];
-    bridges[q] = tgt < -1 ? -2 : bridges[q] < -1 ? tgt : bridges[q] + (tgt - bridges[q]) * ks;
-  }
 
   // Mountains: height = growth, colour = weekly return
   for (const m of allMountains) {
@@ -863,7 +850,7 @@ function animate() {
   pu.uAtmosphereColor.value.copy(ATMO_CALM).lerp(ATMO_STORM, s); // blue → red with fear
   pu.uAccent.value.copy(pu.uAtmosphereColor.value);
   pu.uSunIntensity.value = CONFIG.planetLight * (1 - 0.55 * s);    // storms dim the sun
-  pu.uAmbientLight.value = 0.055 + 0.025 * s;
+  pu.uAmbientLight.value = 0.018 + 0.015 * s;   // dark night side
   sun.intensity = 2.4 - 1.1 * s;
 
   // Continents for the shader: centre direction + world→local rotation (fixed)
@@ -918,7 +905,6 @@ const start = weekFromUrl() ?? data.dates.findIndex((d) => d >= '2007-06-29');
 setWeek(start, { quake: false });
 // Jump straight to the starting state (no slow fade-in on load)
 state.storm = state.targetStorm; state.sea = state.targetSea;
-planetUniforms.uBridge.value.set(state.bridgeTarget);
 for (const m of allMountains) {
   const u = m.userData; u.height = u.targetHeight; u.color.copy(u.targetColor); u.glow = u.targetGlow;
 }

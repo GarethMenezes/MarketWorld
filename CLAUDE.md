@@ -19,8 +19,7 @@ Every visual must map to a real number. No data-free effects except pure atmosph
 | Volatility | (available: per-continent storms if time) | `stocks[].vol`, `sectors[].vol` |
 | Market fear (VIX) | Sky, atmosphere blue→red, cloud cover/darkness, lightning | `market.vix` |
 | Crash week | Earthquake when average weekly return < -7% | `market.ret` |
-| Average sector correlation (30-day) | Sea level falls; land bridges and salt flats exposed → one landmass | `market.avgCorr` |
-| Pair correlation (60-day) | Each land bridge's crest height | `market.pairCorr["A|B"]` |
+| Average sector correlation (30-day) | Sea level falls; salt-flat shelves exposed around every coast | `market.avgCorr` |
 
 Key insight for judges: in calm markets sectors move independently (continents spread out); in a crisis everything falls together (correlation → 1, the sea drains and the continents join into one landmass). Diversification fails exactly when you need it.
 
@@ -103,8 +102,9 @@ Calm week → play from 2007, sky reddens → pause at `?week=2008-10-10` (super
 
 ## 9. Sea level model (replaces continental drift)
 
-- Continents are FIXED (octahedron `PLATE_DIRS`); neighbours (12 pairs) are joined by submerged land
-  bridges. Opposite pairs (Technology–Healthcare, Financials–Consumer, Energy–Industrials) have none.
+- Continents are FIXED (octahedron `PLATE_DIRS`) with organic shapes (per-continent size, stretch,
+  rotation, domain-warped coasts, a few offshore islands: `continentShape` in the shader). No bridges.
 - `uSeaLevel` (shader) from avgCorr: normal at ≤ 0.3, lowest at ≥ 0.85 (`CONFIG.sea`).
-- `uBridge[a*6+b]` crest from that pair's pairCorr (`CONFIG.bridges`), always below normal sea level.
+- `market.pairCorr` (60-day, 15 pairs) is in world.json but currently unused by the frontend.
+- Planet look: dark night side, polar ice, ocean glint, limb haze, thin rim, full-res rendering (dpr 2).
 - Exposed seabed = wet sand → salt flats; foam at the shore; faint ring at the normal shoreline.
