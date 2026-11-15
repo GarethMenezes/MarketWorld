@@ -1,141 +1,242 @@
-# 🌍 Market Worlds
+# Market Worlds - DurHack 2026 24 Hour Hackathon
 
-Twenty years of real stock market data, turned into planets you can explore.
+**20 years of real stock market data turned into interactive 3D planets.**
 
-Built at DurHack 2026 for the Marshall Wace "New Worlds" challenge.
+Built at DurHack 2026 for the Marshall Wace **"New Worlds" Challenge**.
 
-## The idea
+## Development Progress
 
-Financial markets are among the most data-rich systems people have ever built, yet most of us only ever see them as a line on a chart.
+## Demo Video
 
-Market Worlds turns that data into a living planet. Each sector is a continent and each company is a mountain that grows with its share price. Market fear becomes the weather, crash weeks shake the ground and set off volcanoes, and the sharpest single-day falls arrive as meteor strikes. When sectors start moving in step, the sea drains away and the coastlines dry out into salt flats.
+[![Watch the demo](https://img.youtube.com/vi/Iji78dfHnqs/maxresdefault.jpg)](https://youtu.be/Iji78dfHnqs)
 
-There is one planet each for the US, the UK and Asia-Pacific. Press play and watch the 2008 financial crisis, the COVID crash and the AI boom reshape each world.
+*Click the image to watch the demo on YouTube.*
 
-## How the data becomes a world
+**1. Initial prototype**
+![Initial prototype](demo-screenshots/initial.png)
+*First working version of the planet with basic terrain.*
 
-Every visual effect is driven by a real number.
+**2. Midway**
+![Midway progress](demo-screenshots/midway.png)
+*Added sectors as continents, weather and the timeline.*
 
-| Market data | What you see |
+**3. Final version**
+![Final version](demo-screenshots/final1.png)
+*Full planet with storms, oceans and company mountains.*
+
+![Final version, second view](demo-screenshots/final2.png)
+*A crisis moment showing the market data in action.*
+
+## The Idea
+
+Stock markets contain huge amounts of data, but most of the time we just look at them through graphs and numbers.
+
+We wanted to make this more interesting and easier to understand.
+
+Market Worlds takes real financial data and turns it into a 3D planet that changes depending on what's happening in the market.
+
+Each sector is represented by a continent, and each company is a mountain. When a company's share price increases, its mountain grows. When the market becomes more volatile, the weather gets worse, with storms, lightning and even volcanic eruptions during major crashes.
+
+We created three different planets representing the **US, UK and Asia-Pacific markets**.
+
+You can travel through nearly 20 years of market history and see how events like the 2008 financial crisis, COVID-19 and the AI boom affected each market.
+
+## How It Works
+
+Everything you see on the planet is linked to real financial data.
+
+| Market Data | What Happens on the Planet |
 | --- | --- |
-| Sector (Technology, Financials, Energy, Healthcare, Consumer, Industrials) | A continent with its own shape and colour |
-| A company | A mountain on its sector's continent |
-| Share price growth since 2007 | Mountain height (log scale) |
-| This week's return | A glowing ring at the mountain's foot: green for up, red for down |
-| Market fear | Storm clouds, a red atmosphere, a dimmer sun and lightning |
-| How closely sectors move together | Sea level: the water falls as correlation rises |
-| A week when the market fell more than 7% | An earthquake, with volcanoes erupting on the two hardest-hit sectors |
-| A single day with an extreme fall | A meteor strike that leaves a fading crater |
+| Market sectors | Each sector becomes a continent |
+| Companies | Each company is represented by a mountain |
+| Share price growth since 2007 | Mountains grow or shrink based on performance |
+| Weekly returns | Green or red rings show whether a company gained or lost value |
+| Market volatility | Higher volatility causes storms, darker skies and lightning |
+| Correlation between sectors | Higher correlation causes sea levels to fall |
+| Market crashes (weekly fall over 7%) | Earthquakes and volcanic eruptions |
+| Extreme single-day falls | Meteor strikes that leave craters |
 
-Market fear is the VIX index for the US. The UK and Asia have no freely available fear index, so their planets use the market's own realised volatility instead, which sits on a similar scale.
+For the US market, we use the VIX index to measure market fear. For the UK and Asia-Pacific, we calculate volatility using historical price data.
 
-## The key insight
+## The Main Idea Behind It
 
-In calm markets, sectors move fairly independently and the sea sits at its normal level. In a crisis, almost everything falls at once and the correlation between sectors jumps towards 1. On the planet, the sea drains and salt flats appear around every coast in late 2008 and March 2020, then the water returns as markets recover.
+One thing we wanted to show is how markets behave differently during a crisis.
 
-This is why spreading your money across sectors stops protecting you exactly when you need it most. Market Worlds makes that visible at a glance.
+Normally, sectors don't always move in the same direction. For example, technology might be performing well while energy is struggling.
 
-## Why it matters
+However, during a major financial crisis, sectors tend to move together, with many falling at the same time.
 
-Most people can't see market risk until it costs them. Market Worlds is a tool for understanding markets, not for trading them. It can be used for:
+We represent this using the sea level.
 
-- **Education:** showing how markets behave in crashes, booms and recoveries.
-- **Explaining risk:** showing clients why diversification can fail in a crisis.
-- **Spotting stressed markets:** rising fear and rising correlation are visible straight away.
-- **Training:** replaying twenty years of market history in a few minutes.
+When correlation between sectors increases, the sea level drops, exposing more of the coastline. This becomes particularly noticeable during the 2008 financial crisis and the COVID crash in March 2020.
+
+As markets recover and correlation decreases, the water gradually returns.
+
+This helps demonstrate why diversification doesn't always protect investors during major market crashes.
 
 ## Features
 
-- 🌐 **A 3D planet built from real market data**, January 2007 to November 2026.
-- 🪐 **One planet per market.** Switch between the US, UK and Asia-Pacific (the same six sectors and 30 large companies each). The other two markets float beside the planet as small live worlds for the same week; click one to travel there.
-- ⏯️ **A time machine.** Play through history week by week, drag the timeline, or jump to any date.
-- 🗺️ **Guided tours.** The US tour has twelve stops with sourced notes on each event. The UK and Asia tours are generated from each market's own data.
-- 🔎 **Ask the planet.** Type a question such as "When did banks crash?", "Tell me about Apple", "What happened in 2016?" or "Brexit", and the planet flies to the answer. Example questions appear when you click the search box. With an API key an AI answers free-form questions; without one, a built-in matcher handles companies, sectors, years, dates and about fifteen named events. It does not give investment advice.
-- 🤖 **Explanations.** Click a mountain or a continent to see its numbers for that week, with a short explanation written by an AI from those numbers only, or a summary built from the data when no AI is available.
-- 🧪 **What if?** Shock one sector (for example, Energy −30%) and see how the others would probably react, in calm conditions and in a crisis. It uses a simple linear model from historical data and works offline.
-- ☄️ **Meteor strikes** on shock days. Click a crater to see the date and the size of the fall.
-- 🔊 **A soundscape generated from the data:** a drone, wind, waves, thunder, earthquakes and meteors. It is muted until you turn it on.
+- **Interactive 3D Planets** — Explore real financial market data from January 2007 to November 2026.
+- **Three Different Markets** — Switch between the US, UK and Asia-Pacific. Each planet contains six sectors and 30 companies. The other two planets also appear nearby and can be clicked to travel between markets.
+- **Time Travel** — Play through market history week by week, move the timeline manually or jump straight to a specific date.
+- **Guided Tours** — Explore important financial events. The US has 12 guided stops with explanations, while the UK and Asia-Pacific tours are generated using their own market data.
+- **Ask the Planet** — Search for companies, sectors and historical events. For example, you can ask "What happened during the 2008 financial crisis?" or "How did Apple perform?". With an API key, Claude can answer more general questions. Without one, the built-in search still supports companies, sectors, dates and major events.
+- **AI Explanations** — Click on a mountain or continent to view its financial data and get an explanation of what happened during that period. If AI isn't available, the application generates an explanation directly from the data.
+- **What If? Simulator** — Test how a sudden change in one sector might affect others. For example, you can simulate a 30% drop in Energy and compare how other sectors might react in normal market conditions versus a crisis. This uses a simple model based on historical data.
+- **Meteor Strikes** — Major single-day falls are shown as meteor impacts. Clicking a crater shows when the event happened and how much the market fell.
+- **Dynamic Sound Effects** — The planet also has sounds generated through code, including wind, waves, thunder, earthquakes and meteor impacts. Audio is off by default.
 
-## Tech stack
+## Tech Stack
 
-| Part | Tools |
+| Component | Technologies |
 | --- | --- |
-| Data | Python, pandas, NumPy, yfinance (Yahoo Finance) |
-| 3D world | Three.js, a custom GLSL planet shader, Vite, plain JavaScript |
-| Sound | Web Audio API (every sound is generated in code) |
-| AI | FastAPI backend with the Anthropic Claude API (optional) |
+| Data collection and processing | Python, pandas, NumPy, yfinance |
+| 3D visualisation | Three.js, GLSL shaders, Vite, JavaScript |
+| Audio | Web Audio API |
+| AI explanations | FastAPI, Anthropic Claude API (optional) |
 
-## Run it yourself
+## Running the Project
 
-You need Node.js 18 or later. Python 3.10 or later is only needed to rebuild the data or run the AI backend.
+You'll need **Node.js 18+** to run the application.
+
+Python 3.10+ is only needed if you want to rebuild the dataset or use the AI backend.
+
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/GarethMenezes/MarketWorld.git
 cd MarketWorld
+```
+
+### 2. Install Dependencies
+
+```bash
 npm install
+```
+
+### 3. Start the Application
+
+```bash
 npm run dev
 ```
 
-Open the link it prints. All the market data is already in `public/`, so the planet works offline.
+Open the local URL shown in your terminal.
 
-You can open a particular market and week by adding to the link:
+All the processed market data is already included in the `public/` folder, so the main application works without an internet connection.
 
-- `?week=2008-10-10`: the worst week of the 2008 financial crisis
-- `?week=2020-03-20`: the COVID crash
-- `?market=uk` or `?market=asia`: the UK or Asia-Pacific planet (combine with `&week=`)
+### Jumping to Specific Events
 
-### AI explanations (optional)
+You can use URL parameters to open particular markets and dates:
+
+- `?week=2008-10-10` — The 2008 financial crisis
+- `?week=2020-03-20` — The COVID market crash
+- `?market=uk` — UK market
+- `?market=asia` — Asia-Pacific market
+
+You can also combine market and date parameters.
+
+### Using AI Explanations (Optional)
+
+To enable Claude-powered explanations, run the Python backend:
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate
+# Windows: .venv\Scripts\activate
+
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=your-key  # Windows PowerShell: $env:ANTHROPIC_API_KEY="your-key"
+export ANTHROPIC_API_KEY=your-key
+# Windows PowerShell:
+# $env:ANTHROPIC_API_KEY="your-key"
+
 uvicorn server.app:app --port 8000
 ```
 
-The key stays on the backend and is never sent to the browser. Without a key, everything still works and the explanations are built from the numbers.
+The API key is only used on the backend and isn't exposed to the browser.
 
-### Rebuilding the data (optional)
+AI is completely optional. Without an API key, the planet and its other features still work.
+
+### Rebuilding the Market Data
+
+To download and process the data again:
 
 ```bash
-python build_world.py --market all   # or --market us | uk | asia; add --cached to skip the download
-npm test                             # checks the models and the generated data
+python build_world.py --market all
 ```
 
-## How it works
+You can also choose an individual market using `us`, `uk` or `asia`. Add `--cached` to reuse previously downloaded data.
 
-1. `build_world.py` downloads about twenty years of daily prices for 30 large companies per market (five per sector), plus the VIX for the US.
-2. For each market it calculates weekly growth, returns, volatility, trading volume, the rolling correlation between sectors, the extreme-fall days used for meteors, the calm-versus-crisis figures used by "What if?", and (for the UK and Asia) a tour. These are saved as JSON files in `public/`, about 1 MB per market.
-3. `main.js` builds the planet with Three.js. A ray-traced shader draws the oceans, terrain, clouds, atmosphere and volcanoes, and each week of data reshapes the mountains, the weather and the sea level.
-4. When you click a mountain or ask a question, the backend looks up the real numbers for that week itself, asks the AI to explain them in plain English, and checks the answer against the data. If the AI is unavailable, the app answers from the data instead.
+To run the tests:
+
+```bash
+npm test
+```
+
+## How We Built It
+
+The project is split into a few main parts.
+
+**1. Collecting the data**
+
+We used Python and yfinance to download historical stock prices going back to 2007. Each market contains 30 companies across six sectors, with five companies in each sector.
+
+**2. Processing the data**
+
+Using pandas and NumPy, we calculated weekly returns, share price growth, volatility and correlations between sectors.
+
+We also identified major crashes and extreme daily price movements to use for the earthquakes, volcanoes and meteor effects.
+
+The processed results are saved as JSON files, roughly 1 MB per market.
+
+**3. Building the 3D planet**
+
+We used Three.js and custom GLSL shaders to create the planet, including its terrain, oceans, clouds, atmosphere and volcanoes.
+
+As you move through the timeline, the financial data updates the mountains, weather and sea levels.
+
+**4. Adding AI**
+
+We built a FastAPI backend that retrieves the actual market data for the selected company, sector and date.
+
+This information is passed to Claude, which generates a short explanation based on the available figures. The backend also checks the response against the data.
+
+If the AI isn't available, the application uses its own data-based explanations instead.
 
 ## Limitations
 
-- **Not financial advice.** Market Worlds is for exploration and education.
-- **These are hand-picked groups of companies, not official market indexes.** Each planet shows 30 large companies chosen because they have price history back to 2007.
-- **Survivorship bias.** The companies are large today, so the planets look rosier than the real markets did. Firms that collapsed, such as Lehman Brothers, are not included.
-- **Mountain height uses share price growth, not company size,** because free data sources don't include historical market capitalisation.
-- **UK and Asia fear is realised volatility, not an index like the VIX.** Asian returns are in each stock's local currency.
-- **The sea level is a visual scale for correlation,** not a physical height.
-- **"What if?" is a simple linear model,** not a prediction.
-- **AI explanations only use the numbers shown,** and they say so when the data doesn't explain why something moved.
+- **Not financial advice:** The application is designed for education and exploring historical market behaviour, not making investment decisions.
+- **Company selection:** Each market contains 30 selected companies, so the planets don't represent official stock market indices.
+- **Survivorship bias:** We mainly use companies that are large today and have data going back to 2007. This means companies that collapsed, such as Lehman Brothers, aren't represented.
+- **Mountain sizes:** Mountain height represents share price growth rather than actual company market capitalisation.
+- **Volatility:** The US uses the VIX, while the UK and Asia-Pacific use calculated historical volatility.
+- **Currency:** Asia-Pacific returns are calculated using each company's local currency.
+- **Sea levels:** These represent correlation between sectors rather than actual physical sea levels.
+- **What If? simulator:** This uses a basic linear model based on historical relationships. It isn't intended to predict future market movements.
+- **AI explanations:** The AI uses the available financial data and won't always be able to explain the underlying reason behind a price movement.
 
 ## Credits
 
-- The planet shader is adapted from Julien Sulpis's [realtime planet shader](https://github.com/jsulpis/realtime-planet-shader) (GPL-3.0), via Gareth Menezes's adaptation.
-- The volcano shape comes from [TerraForge3D](https://github.com/Jaysmito101/TerraForge3D) (MIT).
-- The ocean colours and reference coastline come from [Sea Level Explorer](https://github.com/archimedix/sea-level-explorer) (MIT).
-- The atmosphere and water lighting are adapted from the [Three.js](https://github.com/mrdoob/three.js) Sky and Water examples (MIT).
-- Market data comes from Yahoo Finance via yfinance.
+We used and adapted parts of several open-source projects:
 
-Full details are in [NOTICES.md](NOTICES.md).
+- [Realtime Planet Shader](https://github.com/jsulpis/realtime-planet-shader) by Julien Sulpis (GPL-3.0).
+- [TerraForge3D](https://github.com/Jaysmito101/TerraForge3D) (MIT) for the volcano geometry.
+- [Sea Level Explorer](https://github.com/archimedix/sea-level-explorer) (MIT) for ocean colours and coastline references.
+- [Three.js](https://github.com/mrdoob/three.js) Sky and Water examples (MIT) for atmospheric and water lighting.
+- Yahoo Finance through yfinance for historical market data.
+
+Additional licensing and attribution details can be found in [NOTICES.md](NOTICES.md).
 
 ## Team
+
+Developed at **DurHack 2026** by:
 
 - Gareth Menezes
 - Sota
 
 ## Licence
 
-See [LICENSE](LICENSE). The planet shader (`shaders/planet.frag.glsl`) is GPL-3.0, so any distributed build that includes it is covered by GPL-3.0. See [NOTICES.md](NOTICES.md).
+See [LICENSE](LICENSE) for the project's licence.
+
+The planet shader (`shaders/planet.frag.glsl`) is licensed under GPL-3.0, meaning distributed builds containing it must comply with the GPL-3.0 requirements.
+
+Additional details are available in [NOTICES.md](NOTICES.md).
