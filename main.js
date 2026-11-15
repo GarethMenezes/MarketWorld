@@ -13,6 +13,7 @@ import { createAsk } from './ask.js';
 import { createMeteors } from './meteors.js';
 import { createAudio } from './audio.js';
 import { buildOceanPalette } from './ocean-palette.js';
+import { choosePickHit } from './picking.js';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
 // Tuned on real data 2007–2026 (see check_world.py output).
@@ -443,6 +444,7 @@ const continents = data.sectors.map((sector, i) => {
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
     mesh.userData = { ticker, sector: sector.name, stock: stockIndex[ticker], height: 0.2, targetHeight: 0.2, ring, label,
       color: new THREE.Color('#888888'), targetColor: new THREE.Color('#888888'), glow: 0, targetGlow: 0 };
+    ring.userData = { ticker, sector: sector.name, companyMesh: mesh };
     mesh.scale.set(1, 0.2, 1);
     group.add(mesh);
     return mesh;
@@ -450,7 +452,7 @@ const continents = data.sectors.map((sector, i) => {
   return { sector, group, land, mountains, sectorLabel };
 });
 const allMountains = continents.flatMap((c) => c.mountains);
-const pickables = [...allMountains, ...continents.map((c) => c.land)]; // craters are added below
+const pickables = [...allMountains, ...allMountains.map((m) => m.userData.ring), ...continents.map((c) => c.land)]; // craters are added below
 
 // ───────────────────────────── MAPPINGS (data → visual targets) ─────────────────────────────
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
@@ -849,26 +851,65 @@ $('rotate').addEventListener('click', () => {
   controls.autoRotate = !state.rotationPaused && !state.playing && !state.touring;
 });
 
-// Click picking (ignore drags)
+// Company labels, mountains and rings all resolve to the same selection.
 const raycaster = new THREE.Raycaster();
 const pickSurface = new THREE.Sphere(new THREE.Vector3(), R * 0.995), pickPoint = new THREE.Vector3();
 const pointer = new THREE.Vector2();
-let downAt = null;
-canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
-canvas.addEventListener('pointerup', (e) => {
-  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+const hoverTip = document.createElement('div');
+hoverTip.className = 'company-tooltip';
+hoverTip.hidden = true;
+document.body.append(hoverTip);
+let hoveredCompany = null, downAt = null, hoverAt = null, lastHoverTime = 0;
+
+function pickAt(x, y) {
+  // Labels sit above the peaks: a ray through their text often hits the sector below.
+  // Match the visible label first, using the renderer's stacking order for overlaps.
+  const labels = allMountains.filter((m) => {
+    const label = m.userData.label, el = label.element;
+    if (!m.visible || !label.visible || el.style.display === 'none') return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }).sort((a, b) => Number(b.userData.label.element.style.zIndex) - Number(a.userData.label.element.style.zIndex));
+  if (labels.length) return labels[0].userData;
   const rect = canvas.getBoundingClientRect();
-  pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+  pointer.set(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1);
+  scene.updateMatrixWorld(true);
   raycaster.setFromCamera(pointer, camera);
   pickSurface.center.copy(world.position);
   const ground = raycaster.ray.intersectSphere(pickSurface, pickPoint);
   const groundDist = ground ? raycaster.ray.origin.distanceTo(pickPoint) : Infinity;
-  const hits = raycaster.intersectObjects(pickables, false)
-    .filter((h) => h.object.visible && (h.object.userData.marketId || h.distance <= groundDist + 0.15));
-  // Craters lie flat on the surface, under the (invisible) continent pick mesh: let them win
-  const hit = hits.find((h) => h.object.userData.crater) ?? hits[0];
-  if (!hit) return;
-  const u = hit.object.userData;
+  return choosePickHit(raycaster.intersectObjects(pickables, false), groundDist)?.object.userData ?? null;
+}
+function updateHover() {
+  const hit = hoverAt && !downAt ? pickAt(...hoverAt) : null;
+  const company = hit?.ticker ? allMountains.find((m) => m.userData.ticker === hit.ticker) : null;
+  if (company !== hoveredCompany) {
+    hoveredCompany?.userData.label.element.classList.remove('hovered');
+    hoveredCompany = company;
+    hoveredCompany?.userData.label.element.classList.add('hovered');
+  }
+  canvas.style.cursor = hit ? 'pointer' : 'grab';
+  hoverTip.hidden = !company;
+  if (company) {
+    const u = company.userData;
+    hoverTip.textContent = `${COMPANY[u.ticker]} (${u.ticker}) · ${u.sector}`;
+    hoverTip.style.left = `${Math.max(8, Math.min(hoverAt[0] + 14, innerWidth - hoverTip.offsetWidth - 8))}px`;
+    hoverTip.style.top = `${Math.max(8, Math.min(hoverAt[1] + 18, innerHeight - hoverTip.offsetHeight - 8))}px`;
+  }
+}
+canvas.addEventListener('pointermove', (e) => { hoverAt = [e.clientX, e.clientY]; });
+canvas.addEventListener('pointerleave', () => { hoverAt = null; updateHover(); });
+canvas.addEventListener('pointercancel', () => { downAt = hoverAt = null; updateHover(); });
+canvas.addEventListener('pointerdown', (e) => {
+  downAt = [e.clientX, e.clientY];
+  updateHover();
+});
+canvas.addEventListener('pointerup', (e) => {
+  const start = downAt;
+  downAt = null;
+  if (!start || Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 5) return;
+  const u = pickAt(e.clientX, e.clientY);
+  if (!u) return;
   if (u.marketId) { goToMarket(u.marketId); return; }
   if (state.sandbox) return;
   if (u.crater) { select({ crater: u.crater }); return; }
@@ -1132,6 +1173,11 @@ function animate() {
     m.material.emissive.copy(u.color).multiplyScalar(u.glow * 0.06);
     u.ring.material.color.copy(u.color);                          // the clear signal: glowing foot ring
     u.ring.material.opacity = 0.15 + 0.6 * Math.min(1, u.glow);
+    if (m === hoveredCompany) {
+      m.material.emissive.copy(GREEN).multiplyScalar(0.3);
+      u.ring.material.color.copy(GREEN);
+      u.ring.material.opacity = 1;
+    }
     u.ring.visible = m.visible;
   }
 
@@ -1192,6 +1238,8 @@ function animate() {
   updateLabels();
   composer.render(dt);
   labelRenderer.render(scene, camera);
+  // Recheck during rotation as well as pointer movement, without raycasting every frame.
+  if (t - lastHoverTime > 0.1) { updateHover(); lastHoverTime = t; }
   requestAnimationFrame(animate);
 }
 
