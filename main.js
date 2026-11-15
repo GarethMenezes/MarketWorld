@@ -13,7 +13,6 @@ import { createAsk } from './ask.js';
 import { createMeteors } from './meteors.js';
 import { createAudio } from './audio.js';
 import { buildOceanPalette } from './ocean-palette.js';
-import { choosePickHit } from './picking.js';
 
 // ───────────────────────────── TUNABLE VALUES ─────────────────────────────
 // Tuned on real data 2007–2026 (see check_world.py output).
@@ -452,7 +451,6 @@ const continents = data.sectors.map((sector, i) => {
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
     mesh.userData = { ticker, sector: sector.name, stock: stockIndex[ticker], height: 0.2, targetHeight: 0.2, ring, label,
       color: new THREE.Color('#888888'), targetColor: new THREE.Color('#888888'), glow: 0, targetGlow: 0 };
-    ring.userData = { ticker, sector: sector.name, companyMesh: mesh };
     mesh.scale.set(1, 0.2, 1);
     group.add(mesh);
     return mesh;
@@ -869,7 +867,7 @@ $('rotate').addEventListener('click', () => {
   controls.autoRotate = !state.rotationPaused && !state.playing && !state.touring;
 });
 
-// Company labels, mountains and rings all resolve to the same selection.
+// Click picking (ignore drags)
 const raycaster = new THREE.Raycaster();
 const pickSurface = new THREE.Sphere(new THREE.Vector3(), R * 0.995), pickPoint = new THREE.Vector3();
 const pointer = new THREE.Vector2();
@@ -890,16 +888,15 @@ function nearestMountain(point) {
 canvas.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   const rect = canvas.getBoundingClientRect();
-  pointer.set(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1);
-  scene.updateMatrixWorld(true);
+  pointer.set(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
   raycaster.setFromCamera(pointer, camera);
   pickSurface.center.copy(world.position);
   const ground = raycaster.ray.intersectSphere(pickSurface, pickPoint);
   const groundDist = ground ? raycaster.ray.origin.distanceTo(pickPoint) : Infinity;
   const hits = raycaster.intersectObjects(pickables, false)
     .filter((h) => h.object.visible && (h.object.userData.marketId || h.distance <= groundDist + 0.15));
-  // Priority: crater, then a company (mountain or its ring), then the sector underneath
-  let hit = hits.find((h) => h.object.userData.crater) ?? hits.find((h) => h.object.userData.ticker) ?? hits[0];
+  // Priority: a company (mountain, ring or label), then a crater, then the sector underneath
+  let hit = hits.find((h) => h.object.userData.ticker) ?? hits.find((h) => h.object.userData.crater) ?? hits[0];
   if (!hit) return;
   if (!hit.object.userData.ticker && !hit.object.userData.crater && !hit.object.userData.marketId) {
     const near = nearestMountain(hit.point);                     // a click right at a mountain's foot
@@ -1169,11 +1166,6 @@ function animate() {
     m.material.emissive.copy(u.color).multiplyScalar(u.glow * 0.06);
     u.ring.material.color.copy(u.color);                          // the clear signal: glowing foot ring
     u.ring.material.opacity = 0.15 + 0.6 * Math.min(1, u.glow);
-    if (m === hoveredCompany) {
-      m.material.emissive.copy(GREEN).multiplyScalar(0.3);
-      u.ring.material.color.copy(GREEN);
-      u.ring.material.opacity = 1;
-    }
     u.ring.visible = m.visible;
   }
 
@@ -1234,8 +1226,6 @@ function animate() {
   updateLabels();
   composer.render(dt);
   labelRenderer.render(scene, camera);
-  // Recheck during rotation as well as pointer movement, without raycasting every frame.
-  if (t - lastHoverTime > 0.1) { updateHover(); lastHoverTime = t; }
   requestAnimationFrame(animate);
 }
 
