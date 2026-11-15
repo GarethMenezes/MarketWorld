@@ -412,8 +412,13 @@ const continents = data.sectors.map((sector, i) => {
   const tint = SECTOR_COLORS[sector.name] || '#88aa66';
   const group = new THREE.Group();
   // Invisible pick target: the planet shader draws the land, this mesh only answers clicks
-  const land = new THREE.Mesh(makeContinentGeometry(seed, tint, i * 0.004),
-    new THREE.MeshBasicMaterial({ visible: false }));
+  const landGeo = makeContinentGeometry(seed, tint, i * 0.004);
+  // Flatten onto the shader's surface (radius R): the old terrain heights buried short mountains
+  // inside this invisible mesh, so clicks on them selected the sector instead of the company
+  const lp = landGeo.attributes.position, lv = new THREE.Vector3();
+  for (let v = 0; v < lp.count; v++) { lv.fromBufferAttribute(lp, v).setLength(R + 0.002); lp.setXYZ(v, lv.x, lv.y, lv.z); }
+  landGeo.computeBoundingSphere();
+  const land = new THREE.Mesh(landGeo, new THREE.MeshBasicMaterial({ visible: false }));
   planetUniforms.uContinentColor.value[i].set(tint);
   const sectorLabel = makeLabel(sector.name, 'sec');
   sectorLabel.position.set(0, 0, R + 0.25); // continent centre (mountains ring around it)
@@ -435,10 +440,13 @@ const continents = data.sectors.map((sector, i) => {
       color: '#ffd23a', transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
     ring.position.copy(d).multiplyScalar(R + 0.012);
     ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
+    ring.userData = { ticker, sector: sector.name };   // clicking the ring picks the company
     group.add(ring);
     // US: tickers are familiar; other markets: company names ("7203.T" means nothing to most people)
     const label = makeLabel(MARKET.id === 'us' ? ticker : COMPANY[ticker], 'tk', `${COMPANY[ticker]} (${ticker})`);
     label.position.set(0, 1.08, 0); // just above the peak; follows the mountain's height
+    label.element.classList.add('clickable');                 // clicking the name picks the company
+    label.element.addEventListener('click', (ev) => { ev.stopPropagation(); if (!state.sandbox) select({ ticker, sector: sector.name }); });
     mesh.add(label);
     mesh.position.copy(d).multiplyScalar(R - 0.02); // shader surface is a sphere of radius R
     mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d);
@@ -571,6 +579,11 @@ function nearestWeek(dates, date) {
   let index = 0, best = Infinity;
   dates.forEach((d, i) => { const gap = Math.abs(Date.parse(`${d}T12:00:00Z`) - t); if (gap < best) { best = gap; index = i; } });
   return index;
+}
+// The week (ending Friday) that contains a date: what a date picker or ?week= link should show
+function weekContaining(dates, date) {
+  const i = dates.findIndex((d) => d >= date);
+  return i === -1 ? dates.length - 1 : i;
 }
 const fmtDate = (s) => new Date(s + 'T00:00:00Z').toLocaleDateString('en-GB',
   { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
@@ -827,13 +840,18 @@ $('nextStop').addEventListener('click', () => goToStop(state.touring ? state.tou
 const jumpDate = $('jumpDate');
 jumpDate.min = data.dates[0];
 jumpDate.max = data.dates[N - 1];
-$('dateForm').addEventListener('submit', (e) => {
-  e.preventDefault();
-  if (!jumpDate.value) return;
-  const w = nearestWeek(data.dates, jumpDate.value);
+// Travel as soon as a full date is picked in the calendar or typed (the Go button is hidden in
+// this design, so waiting for a form submit meant the calendar did nothing)
+function travelToDate() {
+  if (!jumpDate.value || state.sandbox) return;
+  const w = weekContaining(data.dates, jumpDate.value);
+  if (w === state.week) return;
   setPlaying(false);
-  setWeek(w === -1 ? N - 1 : w);
-});
+  if (state.touring) exitTour();
+  setWeek(w);
+}
+jumpDate.addEventListener('change', travelToDate);
+$('dateForm').addEventListener('submit', (e) => { e.preventDefault(); travelToDate(); });
 $('about').addEventListener('click', () => $('aboutDialog').showModal());
 $('closeAbout').addEventListener('click', () => $('aboutDialog').close());
 
@@ -855,22 +873,22 @@ $('rotate').addEventListener('click', () => {
 const raycaster = new THREE.Raycaster();
 const pickSurface = new THREE.Sphere(new THREE.Vector3(), R * 0.995), pickPoint = new THREE.Vector3();
 const pointer = new THREE.Vector2();
-const hoverTip = document.createElement('div');
-hoverTip.className = 'company-tooltip';
-hoverTip.hidden = true;
-document.body.append(hoverTip);
-let hoveredCompany = null, downAt = null, hoverAt = null, lastHoverTime = 0;
-
-function pickAt(x, y) {
-  // Labels sit above the peaks: a ray through their text often hits the sector below.
-  // Match the visible label first, using the renderer's stacking order for overlaps.
-  const labels = allMountains.filter((m) => {
-    const label = m.userData.label, el = label.element;
-    if (!m.visible || !label.visible || el.style.display === 'none') return false;
-    const r = el.getBoundingClientRect();
-    return r.width > 0 && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
-  }).sort((a, b) => Number(b.userData.label.element.style.zIndex) - Number(a.userData.label.element.style.zIndex));
-  if (labels.length) return labels[0].userData;
+let downAt = null;
+canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
+// Mountain whose foot is within reach of a surface point (or null)
+const footPos = new THREE.Vector3();
+function nearestMountain(point) {
+  let best = null, bestD = Infinity;
+  for (const m of allMountains) {
+    if (!m.visible) continue;
+    m.getWorldPosition(footPos);
+    const d = footPos.distanceTo(point), reach = MOUNTAIN_RADIUS * m.scale.x * 1.5;
+    if (d < reach && d < bestD) { best = m; bestD = d; }
+  }
+  return best;
+}
+canvas.addEventListener('pointerup', (e) => {
+  if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   const rect = canvas.getBoundingClientRect();
   pointer.set(((x - rect.left) / rect.width) * 2 - 1, -((y - rect.top) / rect.height) * 2 + 1);
   scene.updateMatrixWorld(true);
@@ -878,38 +896,16 @@ function pickAt(x, y) {
   pickSurface.center.copy(world.position);
   const ground = raycaster.ray.intersectSphere(pickSurface, pickPoint);
   const groundDist = ground ? raycaster.ray.origin.distanceTo(pickPoint) : Infinity;
-  return choosePickHit(raycaster.intersectObjects(pickables, false), groundDist)?.object.userData ?? null;
-}
-function updateHover() {
-  const hit = hoverAt && !downAt ? pickAt(...hoverAt) : null;
-  const company = hit?.ticker ? allMountains.find((m) => m.userData.ticker === hit.ticker) : null;
-  if (company !== hoveredCompany) {
-    hoveredCompany?.userData.label.element.classList.remove('hovered');
-    hoveredCompany = company;
-    hoveredCompany?.userData.label.element.classList.add('hovered');
+  const hits = raycaster.intersectObjects(pickables, false)
+    .filter((h) => h.object.visible && (h.object.userData.marketId || h.distance <= groundDist + 0.15));
+  // Priority: crater, then a company (mountain or its ring), then the sector underneath
+  let hit = hits.find((h) => h.object.userData.crater) ?? hits.find((h) => h.object.userData.ticker) ?? hits[0];
+  if (!hit) return;
+  if (!hit.object.userData.ticker && !hit.object.userData.crater && !hit.object.userData.marketId) {
+    const near = nearestMountain(hit.point);                     // a click right at a mountain's foot
+    if (near) hit = { object: near };
   }
-  canvas.style.cursor = hit ? 'pointer' : 'grab';
-  hoverTip.hidden = !company;
-  if (company) {
-    const u = company.userData;
-    hoverTip.textContent = `${COMPANY[u.ticker]} (${u.ticker}) · ${u.sector}`;
-    hoverTip.style.left = `${Math.max(8, Math.min(hoverAt[0] + 14, innerWidth - hoverTip.offsetWidth - 8))}px`;
-    hoverTip.style.top = `${Math.max(8, Math.min(hoverAt[1] + 18, innerHeight - hoverTip.offsetHeight - 8))}px`;
-  }
-}
-canvas.addEventListener('pointermove', (e) => { hoverAt = [e.clientX, e.clientY]; });
-canvas.addEventListener('pointerleave', () => { hoverAt = null; updateHover(); });
-canvas.addEventListener('pointercancel', () => { downAt = hoverAt = null; updateHover(); });
-canvas.addEventListener('pointerdown', (e) => {
-  downAt = [e.clientX, e.clientY];
-  updateHover();
-});
-canvas.addEventListener('pointerup', (e) => {
-  const start = downAt;
-  downAt = null;
-  if (!start || Math.hypot(e.clientX - start[0], e.clientY - start[1]) > 5) return;
-  const u = pickAt(e.clientX, e.clientY);
-  if (!u) return;
+  const u = hit.object.userData;
   if (u.marketId) { goToMarket(u.marketId); return; }
   if (state.sandbox) return;
   if (u.crater) { select({ crater: u.crater }); return; }
@@ -1250,7 +1246,7 @@ if (import.meta.env.DEV) window.mw = { scene, camera, controls, continents, plan
 function weekFromUrl() {
   const w = new URLSearchParams(location.search).get('week');
   if (!w) return null;
-  const i = nearestWeek(data.dates, w);
+  const i = weekContaining(data.dates, w);
   return i === -1 ? N - 1 : i;
 }
 const start = weekFromUrl() ?? data.dates.findIndex((d) => d >= '2007-06-29');
