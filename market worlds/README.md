@@ -1,3 +1,5 @@
+> **Legacy code:** This branch contains the old legacy version of Market World. Further development took place on the [sota branch](https://github.com/GarethMenezes/MarketWorld/tree/sota), which was eventually merged into [main](https://github.com/GarethMenezes/MarketWorld/tree/main). Please use `main` for the latest version.
+
 # Market Worlds — realtime planet shader
 
 An interactive DurHack 2026 market-history journey using [Julien Sulpis’ realtime-planet-shader](https://github.com/jsulpis/realtime-planet-shader) for the visuals and the [Planet3D](https://github.com/Ishanoshada/Planet3D) scene model for satellite motion.

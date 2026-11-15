@@ -1,3 +1,4 @@
+> **Legacy code:** This branch contains the old legacy version of Market World. Further development took place on the [sota branch](https://github.com/GarethMenezes/MarketWorld/tree/sota), which was eventually merged into [main](https://github.com/GarethMenezes/MarketWorld/tree/main). Please use `main` for the latest version.
 
 Durham Hackathon
 
