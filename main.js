@@ -895,8 +895,8 @@ canvas.addEventListener('pointerup', (e) => {
   const groundDist = ground ? raycaster.ray.origin.distanceTo(pickPoint) : Infinity;
   const hits = raycaster.intersectObjects(pickables, false)
     .filter((h) => h.object.visible && (h.object.userData.marketId || h.distance <= groundDist + 0.15));
-  // Priority: crater, then a company (mountain or its ring), then the sector underneath
-  let hit = hits.find((h) => h.object.userData.crater) ?? hits.find((h) => h.object.userData.ticker) ?? hits[0];
+  // Priority: a company (mountain, ring or label), then a crater, then the sector underneath
+  let hit = hits.find((h) => h.object.userData.ticker) ?? hits.find((h) => h.object.userData.crater) ?? hits[0];
   if (!hit) return;
   if (!hit.object.userData.ticker && !hit.object.userData.crater && !hit.object.userData.marketId) {
     const near = nearestMountain(hit.point);                     // a click right at a mountain's foot
