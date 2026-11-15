@@ -865,6 +865,13 @@ $('rotate').addEventListener('click', () => {
   $('rotate').setAttribute('aria-pressed', String(state.rotationPaused));
   $('rotate').textContent = state.rotationPaused ? '↻' : 'Ⅱ';
   controls.autoRotate = !state.rotationPaused && !state.playing && !state.touring;
+  if (state.rotationPaused) {
+    // Stop dead: with damping on, the controls keep the spin's momentum for a second or two.
+    // One update without damping applies and clears that leftover motion.
+    controls.enableDamping = false;
+    controls.update();
+    controls.enableDamping = true;
+  }
 });
 
 // Click picking (ignore drags)
