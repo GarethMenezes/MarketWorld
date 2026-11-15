@@ -4,6 +4,23 @@
 
 Built at DurHack 2026 for the Marshall Wace **"New Worlds" Challenge**.
 
+## Development Progress
+
+**1. Initial prototype**
+![Initial prototype](demo-screenshots/initial.png)
+*First working version of the planet with basic terrain.*
+
+**2. Midway**
+![Midway progress](demo-screenshots/midway.png)
+*Added sectors as continents, weather and the timeline.*
+
+**3. Final version**
+![Final version](demo-screenshots/final1.png)
+*Full planet with storms, oceans and company mountains.*
+
+![Final version, second view](demo-screenshots/final2.png)
+*A crisis moment showing the market data in action.*
+
 ## The Idea
 
 Stock markets contain huge amounts of data, but most of the time we just look at them through graphs and numbers.
