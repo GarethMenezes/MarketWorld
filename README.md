@@ -6,6 +6,12 @@ Built at DurHack 2026 for the Marshall Wace **"New Worlds" Challenge**.
 
 ## Development Progress
 
+## Demo Video
+
+[![Watch the demo](https://img.youtube.com/vi/Iji78dfHnqs/maxresdefault.jpg)](https://youtu.be/Iji78dfHnqs)
+
+*Click the image to watch the demo on YouTube.*
+
 **1. Initial prototype**
 ![Initial prototype](demo-screenshots/initial.png)
 *First working version of the planet with basic terrain.*
