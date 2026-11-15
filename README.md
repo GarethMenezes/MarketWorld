@@ -1,4 +1,4 @@
-# Market Worlds - DurkHack 2026 24 Hour Hackathon
+# Market Worlds - DurHack 2026 24 Hour Hackathon
 
 **20 years of real stock market data turned into interactive 3D planets.**
 
